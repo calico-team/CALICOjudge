@@ -13,8 +13,8 @@
 #                   environment. For best security leave it as empty as possible.
 #                   Certainly do not place output-files there!
 # <run>             Absolute path to run script to use.
-# <compare>         Absolute path to compare script to use.
-# <compare-args>    Arguments to path to compare script
+# <compare>         Absolute path to compare script to use, optional.
+# <compare-args>    Arguments to pass to compare script, optional.
 #
 # Default run and compare scripts can be configured in the database.
 #
@@ -26,9 +26,7 @@ cleanup ()
 {
 	# Remove some copied files to save disk space
 	if [ "$WORKDIR" ]; then
-		# This assumes that if bin is bind-mounted from the chroot,
-		# then it is read-only so the removal of bin/sh will fail.
-		rm -f "$WORKDIR/../dev/null" "$WORKDIR/../bin/sh" "$WORKDIR/../dj-bin/runpipe" 2> /dev/null || true
+		rm -f "$WORKDIR/../dj-bin/runpipe" 2> /dev/null || true
 
 		# Replace testdata by symlinks to reduce disk usage
 		if [ -f "$WORKDIR/testdata.in" ]; then
@@ -150,7 +148,7 @@ if [ -z "$COMPARE_SCRIPT" ]; then
 else
 	export COMBINED_RUN_COMPARE=0
 fi
-[ -x "$WORKDIR/$PROGRAM" ] || error "submission program not found or not executable"
+[ -x "$WORKDIR/$PROGRAM" ] || error "submission program not found or not executable: '$WORKDIR/$PROGRAM'"
 [ -x "$RUN_SCRIPT" ] || error "run script not found or not executable: $RUN_SCRIPT"
 [ -x "$RUNGUARD" ] || error "runguard not found or not executable: $RUNGUARD"
 if [ ! -x "$COMPARE_SCRIPT" ] && [ $COMBINED_RUN_COMPARE -eq 0 ]; then
@@ -187,12 +185,6 @@ if [ "$CREATE_WRITABLE_TEMP_DIR" ]; then
 	# shellcheck disable=SC2174
 	mkdir -m 777 -p "$WORKDIR/write_tmp"
 fi
-
-# We copy /dev/null: mknod (and the major/minor device numbers) are
-# not portable, while a fifo link has the problem that a cat program
-# must be run and killed.
-logmsg $LOG_DEBUG "creating /dev/null character-special device"
-$GAINROOT cp -pR /dev/null ../dev/null
 
 # Run the solution program (within a restricted environment):
 logmsg $LOG_INFO "running program"
@@ -299,13 +291,11 @@ resourceinfo="\
 runtime: ${program_cputime}s cpu, ${program_walltime}s wall
 memory used: ${memory_bytes} bytes"
 
-if [ $COMBINED_RUN_COMPARE -eq 1 ] && grep '^exitcode: 43' compare.meta > /dev/null 2>&1 ; then
+if [ $COMBINED_RUN_COMPARE -eq 1 ] && grep '^validator-exited-first: true' compare.meta > /dev/null 2>&1 && grep '^exitcode: 43' compare.meta > /dev/null 2>&1 ; then
 	# For interactive problems with combined run/compare scripts, a
 	# WA may override TLE and RTE.
-	# FIXME: For now, we only write to compare.meta if the
-	# validator exited first, but we should always write the meta
-	# file and include information about which exited first and
-	# when.
+	# FIXME: Maybe we are interested in when what program exited. If so, we
+	# can write this to compare.meta
 	if grep '^time-result: .*timelimit' program.meta >/dev/null 2>&1 ; then
 		echo "Timelimit exceeded, but validator exited first with WA." >>system.out
 	elif [ "$program_exit" != "0" ]; then

@@ -4,6 +4,7 @@ namespace App\Controller\Team;
 
 use App\Controller\BaseController;
 use App\Entity\Judging;
+use App\Entity\Language;
 use App\Entity\Problem;
 use App\Entity\Submission;
 use App\Entity\Testcase;
@@ -22,7 +23,6 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Annotation\Route;
-use Symfony\Component\Validator\Constraints\Language;
 
 /**
  * Class SubmissionController
@@ -34,30 +34,15 @@ use Symfony\Component\Validator\Constraints\Language;
  */
 class SubmissionController extends BaseController
 {
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
+    protected EntityManagerInterface $em;
+    protected SubmissionService $submissionService;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected FormFactoryInterface $formFactory;
 
-    /**
-     * @var SubmissionService
-     */
-    protected $submissionService;
-
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var FormFactoryInterface
-     */
-    protected $formFactory;
+    const NEVER_SHOW_COMPILE_OUTPUT = 0;
+    const ONLY_SHOW_COMPILE_OUTPUT_ON_ERROR = 1;
+    const ALWAYS_SHOW_COMPILE_OUTPUT = 2;
 
     public function __construct(
         EntityManagerInterface $em,
@@ -74,18 +59,19 @@ class SubmissionController extends BaseController
     }
 
     /**
-     * @Route("/submit", name="team_submit")
-     * @param Request $request
-     * @return Response
-     * @throws \Exception
+     * @Route("/submit/{problem}", name="team_submit")
      */
-    public function createAction(Request $request)
+    public function createAction(Request $request, ?Problem $problem = null): Response
     {
         $user    = $this->dj->getUser();
         $team    = $user->getTeam();
-        $contest = $this->dj->getCurrentContest($user->getTeamid());
+        $contest = $this->dj->getCurrentContest($user->getTeam()->getTeamid());
+        $data = [];
+        if ($problem !== null) {
+            $data['problem'] = $problem;
+        }
         $form    = $this->formFactory
-            ->createBuilder(SubmitProblemType::class)
+            ->createBuilder(SubmitProblemType::class, $data)
             ->setAction($this->generateUrl('team_submit'))
             ->getForm();
 
@@ -108,16 +94,14 @@ class SubmissionController extends BaseController
                 }
                 $entryPoint = $form->get('entry_point')->getData() ?: null;
                 $submission = $this->submissionService->submitSolution(
-                    $team, $problem->getProbid(), $contest, $language, $files,
+                    $team, $this->dj->getUser(), $problem->getProbid(), $contest, $language, $files, 'team page', null,
                     null, $entryPoint, null, null, $message
                 );
 
                 if ($submission) {
-                    $this->dj->auditlog('submission', $submission->getSubmitid(), 'added',
-                                        'via teampage', null, $contest->getCid());
                     $this->addFlash(
                         'success',
-                        '<strong>Submission done!</strong> Watch for the verdict in the list below.'
+                        'Submission done! Watch for the verdict in the list below.'
                     );
                 } else {
                     $this->addFlash('danger', $message);
@@ -126,7 +110,7 @@ class SubmissionController extends BaseController
             }
         }
 
-        $data = ['form' => $form->createView()];
+        $data = ['form' => $form->createView(), 'problem' => $problem];
 
         if ($request->isXmlHttpRequest()) {
             return $this->render('team/submit_modal.html.twig', $data);
@@ -137,14 +121,11 @@ class SubmissionController extends BaseController
 
     /**
      * @Route("/submission/{submitId<\d+>}", name="team_submission")
-     * @param Request $request
-     * @param int     $submitId
-     * @return Response
      * @throws NonUniqueResultException
      */
-    public function viewAction(Request $request, int $submitId)
+    public function viewAction(Request $request, int $submitId): Response
     {
-        $verificationRequired = (bool)$this->config->get('verification_required');;
+        $verificationRequired = (bool)$this->config->get('verification_required');
         $showCompile      = $this->config->get('show_compile');
         $showSampleOutput = $this->config->get('show_sample_output');
         $allowDownload    = (bool)$this->config->get('allow_team_submission_download');
@@ -159,47 +140,75 @@ class SubmissionController extends BaseController
             ->join('cp.problem', 'p')
             ->join('s.language', 'l')
             ->select('j', 's', 'cp', 'p', 'l')
-            ->andWhere('j.submitid = :submitId')
+            ->andWhere('j.submission = :submitId')
             ->andWhere('j.valid = 1')
             ->andWhere('s.team = :team')
-            ->setParameter(':submitId', $submitId)
-            ->setParameter(':team', $team)
+            ->setParameter('submitId', $submitId)
+            ->setParameter('team', $team)
             ->getQuery()
             ->getOneOrNullResult();
 
-        // Update seen status when viewing submission
+        // Update seen status when viewing submission.
         if ($judging && $judging->getSubmission()->getSubmittime() < $contest->getEndtime() &&
             (!$verificationRequired || $judging->getVerified())) {
             $judging->setSeen(true);
             $this->em->flush();
         }
 
-        /** @var Testcase[] $runs */
         $runs = [];
         if ($showSampleOutput && $judging && $judging->getResult() !== 'compiler-error') {
-            $runs = $this->em->createQueryBuilder()
+            $outputDisplayLimit    = (int)$this->config->get('output_display_limit');
+            $outputTruncateMessage = sprintf("\n[output display truncated after %d B]\n", $outputDisplayLimit);
+
+            $queryBuilder = $this->em->createQueryBuilder()
                 ->from(Testcase::class, 't')
                 ->join('t.content', 'tc')
                 ->leftJoin('t.judging_runs', 'jr', Join::WITH, 'jr.judging = :judging')
                 ->leftJoin('jr.output', 'jro')
-                ->select('t', 'jr', 'tc', 'jro')
+                ->select('t', 'jr', 'tc')
                 ->andWhere('t.problem = :problem')
                 ->andWhere('t.sample = 1')
-                ->setParameter(':judging', $judging)
-                ->setParameter(':problem', $judging->getSubmission()->getProblem())
-                ->orderBy('t.rank')
+                ->setParameter('judging', $judging)
+                ->setParameter('problem', $judging->getSubmission()->getProblem())
+                ->orderBy('t.ranknumber');
+
+            if ($outputDisplayLimit < 0) {
+                $queryBuilder
+                    ->addSelect('tc.output AS output_reference')
+                    ->addSelect('jro.output_run AS output_run')
+                    ->addSelect('jro.output_diff AS output_diff')
+                    ->addSelect('jro.output_error AS output_error')
+                    ->addSelect('jro.output_system AS output_system');
+            } else {
+                $queryBuilder
+                    ->addSelect('TRUNCATE(tc.output, :outputDisplayLimit, :outputTruncateMessage) AS output_reference')
+                    ->addSelect('TRUNCATE(jro.output_run, :outputDisplayLimit, :outputTruncateMessage) AS output_run')
+                    ->addSelect('TRUNCATE(jro.output_diff, :outputDisplayLimit, :outputTruncateMessage) AS output_diff')
+                    ->addSelect('TRUNCATE(jro.output_error, :outputDisplayLimit, :outputTruncateMessage) AS output_error')
+                    ->addSelect('TRUNCATE(jro.output_system, :outputDisplayLimit, :outputTruncateMessage) AS output_system')
+                    ->setParameter('outputDisplayLimit', $outputDisplayLimit)
+                    ->setParameter('outputTruncateMessage', $outputTruncateMessage);
+            }
+
+            $runs = $queryBuilder
                 ->getQuery()
                 ->getResult();
         }
 
+        $actuallyShowCompile = $showCompile == self::ALWAYS_SHOW_COMPILE_OUTPUT
+            || ($showCompile == self::ONLY_SHOW_COMPILE_OUTPUT_ON_ERROR && $judging->getResult() === 'compiler-error');
+
         $data = [
             'judging' => $judging,
             'verificationRequired' => $verificationRequired,
-            'showCompile' => $showCompile,
+            'showCompile' => $actuallyShowCompile,
             'allowDownload' => $allowDownload,
             'showSampleOutput' => $showSampleOutput,
             'runs' => $runs,
         ];
+        if ($actuallyShowCompile) {
+            $data['size'] = 'xl';
+        }
 
         if ($request->isXmlHttpRequest()) {
             return $this->render('team/submission_modal.html.twig', $data);
@@ -210,12 +219,9 @@ class SubmissionController extends BaseController
 
     /**
      * @Route("/submission/{submitId<\d+>}/download", name="team_submission_download")
-     * @param int $submitId
-     *
-     * @return Response
      * @throws NonUniqueResultException
      */
-    public function downloadAction($submitId)
+    public function downloadAction(int $submitId): Response
     {
         $allowDownload = (bool)$this->config->get('allow_team_submission_download');
         if (!$allowDownload) {
@@ -231,8 +237,8 @@ class SubmissionController extends BaseController
             ->select('s, f')
             ->andWhere('s.submitid = :submitId')
             ->andWhere('s.team = :team')
-            ->setParameter(':submitId', $submitId)
-            ->setParameter(':team', $team)
+            ->setParameter('submitId', $submitId)
+            ->setParameter('team', $team)
             ->getQuery()
             ->getOneOrNullResult();
 

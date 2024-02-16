@@ -9,10 +9,11 @@ fos_rest:
         serialize_null: true
     exception:
         enabled: true
-        exception_controller: 'fos_rest.exception.controller:showAction'
+        serializer_error_renderer: true
         messages:
             Symfony\Component\HttpKernel\Exception\BadRequestHttpException: true
             Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException: true
             Symfony\Component\HttpKernel\Exception\NotAcceptableHttpException: true
             Symfony\Component\HttpKernel\Exception\NotFoundHttpException: true
             Symfony\Component\HttpKernel\Exception\UnauthorizedHttpException: true
+    body_listener: ~

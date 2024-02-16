@@ -12,11 +12,12 @@
 
     <h1>Users</h1>
 
-    {{ macros.table(users, table_fields, num_actions) }}
+    {{ macros.table(users, table_fields) }}
 
     {% if is_granted('ROLE_ADMIN') %}
         <p>
             {{ button(path('jury_user_add'), 'Add new user', 'primary', 'plus') }}
+            {{ button(path('jury_reset_login_status'), 'Reset login status of all team users', 'secondary', 'refresh') }}
         </p>
     {% endif %}
 {% endblock %}

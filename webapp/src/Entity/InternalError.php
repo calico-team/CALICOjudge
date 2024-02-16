@@ -2,14 +2,18 @@
 namespace App\Entity;
 
 use App\Doctrine\DBAL\Types\InternalErrorStatusType;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use JMS\Serializer\Annotation as Serializer;
 
 /**
- * Log of judgehost internal errors
+ * Log of judgehost internal errors.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="internal_error",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Log of judgehost internal errors"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Log of judgehost internal errors"},
  *     indexes={
  *         @ORM\Index(name="judgingid", columns={"judgingid"}),
  *         @ORM\Index(name="cid", columns={"cid"})
@@ -18,49 +22,30 @@ use Doctrine\ORM\Mapping as ORM;
 class InternalError
 {
     /**
-     * @var int
      * @ORM\Id
      * @ORM\Column(type="integer", name="errorid", length=4,
      *     options={"comment"="Internal error ID","unsigned"=true},
      *     nullable=false)
      * @ORM\GeneratedValue(strategy="IDENTITY")
      */
-    private $errorid;
+    private int $errorid;
 
     /**
-     * @var int
-     * @ORM\Column(type="integer", name="judgingid",
-     *     options={"comment"="Judging ID","unsigned"=true,"default"="NULL"},
-     *     nullable=true)
-     */
-    private $judgingid;
-
-    /**
-     * @var int
-     * @ORM\Column(type="integer", name="cid",
-     *     options={"comment"="Contest ID","unsigned"=true,"default"="NULL"},
-     *     nullable=true)
-     */
-    private $cid;
-
-    /**
-     * @var string
      * @ORM\Column(type="string", length=255, name="description",
      *     options={"comment"="Description of the error"},
      *     nullable=false)
      */
-    private $description;
+    private string $description;
 
     /**
-     * @var string
      * @ORM\Column(type="text", length=65535, name="judgehostlog",
      *     options={"comment"="Last N lines of the judgehost log"},
      *     nullable=false)
      */
-    private $judgehostlog;
+    private string $judgehostlog;
 
     /**
-     * @var double
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="time",
      *     options={"comment"="Timestamp of the internal error", "unsigned"=true},
      *     nullable=false)
@@ -68,271 +53,134 @@ class InternalError
     private $time;
 
     /**
-     * @var array
      * @ORM\Column(type="json", length=65535, name="disabled",
      *     options={"comment"="Disabled stuff, JSON-encoded"},
      *     nullable=false)
      */
-    private $disabled;
+    private array $disabled;
 
     /**
-     * @var string
      * @ORM\Column(type="internal_error_status", name="status",
-     *     options={"comment"="Status of internal error","default"="'open'"},
+     *     options={"comment"="Status of internal error","default"="open"},
      *     nullable=false)
      */
-    private $status = InternalErrorStatusType::STATUS_OPEN;
+    private string $status = InternalErrorStatusType::STATUS_OPEN;
 
     /**
      * @ORM\ManyToOne(targetEntity="Contest", inversedBy="internal_errors")
      * @ORM\JoinColumn(name="cid", referencedColumnName="cid", onDelete="SET NULL")
      */
-    private $contest;
+    private ?Contest $contest;
 
     /**
      * @ORM\ManyToOne(targetEntity="Judging")
      * @ORM\JoinColumn(name="judgingid", referencedColumnName="judgingid", onDelete="SET NULL")
      */
-    private $judging;
-
+    private ?Judging $judging;
 
     /**
-     * Set errorid
-     *
-     * @param integer $errorid
-     *
-     * @return InternalError
+     * @ORM\OneToMany(targetEntity="Judging", mappedBy="internalError")
+     * @Serializer\Exclude()
      */
-    public function setErrorid($errorid)
+    private Collection $affectedJudgings;
+
+    public function __construct()
+    {
+        $this->affectedJudgings = new ArrayCollection();
+    }
+
+    public function setErrorid(int $errorid): InternalError
     {
         $this->errorid = $errorid;
-
         return $this;
     }
 
-    /**
-     * Get errorid
-     *
-     * @return integer
-     */
-    public function getErrorid()
+    public function getErrorid(): int
     {
         return $this->errorid;
     }
 
-    /**
-     * Set judgingid
-     *
-     * @param integer $judgingid
-     *
-     * @return InternalError
-     */
-    public function setJudgingid($judgingid)
-    {
-        $this->judgingid = $judgingid;
-
-        return $this;
-    }
-
-    /**
-     * Get judgingid
-     *
-     * @return integer
-     */
-    public function getJudgingid()
-    {
-        return $this->judgingid;
-    }
-
-    /**
-     * Set cid
-     *
-     * @param integer $cid
-     *
-     * @return InternalError
-     */
-    public function setCid($cid)
-    {
-        $this->cid = $cid;
-
-        return $this;
-    }
-
-    /**
-     * Get cid
-     *
-     * @return integer
-     */
-    public function getCid()
-    {
-        return $this->cid;
-    }
-
-    /**
-     * Set description
-     *
-     * @param string $description
-     *
-     * @return InternalError
-     */
-    public function setDescription($description)
+    public function setDescription(string $description): InternalError
     {
         $this->description = $description;
-
         return $this;
     }
 
-    /**
-     * Get description
-     *
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }
 
-    /**
-     * Set judgehostlog
-     *
-     * @param string $judgehostlog
-     *
-     * @return InternalError
-     */
-    public function setJudgehostlog($judgehostlog)
+    public function setJudgehostlog(string $judgehostlog): InternalError
     {
         $this->judgehostlog = $judgehostlog;
-
         return $this;
     }
 
-    /**
-     * Get judgehostlog
-     *
-     * @return string
-     */
-    public function getJudgehostlog()
+    public function getJudgehostlog(): string
     {
         return $this->judgehostlog;
     }
 
-    /**
-     * Set time
-     *
-     * @param string $time
-     *
-     * @return InternalError
-     */
-    public function setTime($time)
+    /** @param string|float $time */
+    public function setTime($time): InternalError
     {
         $this->time = $time;
-
         return $this;
     }
 
-    /**
-     * Get time
-     *
-     * @return string
-     */
+    /** @return string|float */
     public function getTime()
     {
         return $this->time;
     }
 
-    /**
-     * Set disabled
-     *
-     * @param array $disabled
-     *
-     * @return InternalError
-     */
-    public function setDisabled($disabled)
+    public function setDisabled(array $disabled): InternalError
     {
         $this->disabled = $disabled;
-
         return $this;
     }
 
-    /**
-     * Get disabled
-     *
-     * @return array
-     */
-    public function getDisabled()
+    public function getDisabled(): array
     {
         return $this->disabled;
     }
 
-    /**
-     * Set status
-     *
-     * @param string $status
-     *
-     * @return InternalError
-     */
-    public function setStatus($status)
+    public function setStatus(string $status): InternalError
     {
         $this->status = $status;
-
         return $this;
     }
 
-    /**
-     * Get status
-     *
-     * @return string
-     */
-    public function getStatus()
+    public function getStatus(): string
     {
         return $this->status;
     }
 
-    /**
-     * Set contest
-     *
-     * @param \App\Entity\Contest $contest
-     *
-     * @return InternalError
-     */
-    public function setContest(\App\Entity\Contest $contest = null)
+    public function setContest(?Contest $contest = null): InternalError
     {
         $this->contest = $contest;
-
         return $this;
     }
 
-    /**
-     * Get contest
-     *
-     * @return \App\Entity\Contest
-     */
-    public function getContest()
+    public function getContest(): ?Contest
     {
         return $this->contest;
     }
 
-    /**
-     * Set judging
-     *
-     * @param \App\Entity\Judging $judging
-     *
-     * @return InternalError
-     */
-    public function setJudging(\App\Entity\Judging $judging = null)
+    public function setJudging(?Judging $judging = null): InternalError
     {
         $this->judging = $judging;
-
         return $this;
     }
 
-    /**
-     * Get judging
-     *
-     * @return \App\Entity\Judging
-     */
-    public function getJudging()
+    public function getJudging(): ?Judging
     {
         return $this->judging;
+    }
+
+    public function getAffectedJudgings(): Collection
+    {
+        return $this->affectedJudgings;
     }
 }

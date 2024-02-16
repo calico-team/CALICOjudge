@@ -2,17 +2,14 @@
 
 namespace App\Validator\Constraints;
 
-use App\Utils\Utils;
+use Symfony\Component\Intl\Countries;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
 use Symfony\Component\Validator\Exception\UnexpectedTypeException;
 
 class CountryValidator extends ConstraintValidator
 {
-    /**
-     * @inheritdoc
-     */
-    public function validate($value, Constraint $constraint)
+    public function validate($value, Constraint $constraint): void
     {
         if (!$constraint instanceof Country) {
             throw new UnexpectedTypeException($constraint, Country::class);
@@ -22,7 +19,7 @@ class CountryValidator extends ConstraintValidator
             return;
         }
 
-        if (!key_exists(strtoupper($value), Utils::ALPHA3_COUNTRIES)) {
+        if (!in_array(strtoupper($value), Countries::getAlpha3Codes())) {
             $this->context->buildViolation($constraint->message)->addViolation();
         }
     }

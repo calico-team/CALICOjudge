@@ -8,11 +8,12 @@ use Symfony\Component\Form\FormBuilderInterface;
 
 class ContestImportType extends AbstractType
 {
-    public function buildForm(FormBuilderInterface $builder, array $options)
+    public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder->add('file', BootstrapFileType::class, [
             'required' => true,
+            'help' => 'Importing a contest may overwrite some settings (e.g. penalty time, clarification categories, clarification answers, etc.). This action can not be undone.',
         ]);
-        $builder->add('import', SubmitType::class);
+        $builder->add('import', SubmitType::class, ['icon' => 'fa-upload']);
     }
 }

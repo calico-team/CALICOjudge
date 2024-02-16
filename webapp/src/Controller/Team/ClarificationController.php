@@ -4,18 +4,23 @@ namespace App\Controller\Team;
 
 use App\Controller\BaseController;
 use App\Entity\Clarification;
+use App\Entity\Contest;
 use App\Entity\Problem;
+use App\Entity\Team;
 use App\Form\Type\TeamClarificationType;
 use App\Service\ConfigurationService;
 use App\Service\DOMJudgeService;
 use App\Service\EventLogService;
 use App\Utils\Utils;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\NonUniqueResultException;
 use Doctrine\ORM\Query\Expr\Join;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\Form\FormFactoryInterface;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Annotation\Route;
@@ -31,30 +36,11 @@ use Symfony\Component\Routing\Annotation\Route;
  */
 class ClarificationController extends BaseController
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * @var FormFactoryInterface
-     */
-    protected $formFactory;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected EntityManagerInterface $em;
+    protected EventLogService $eventLogService;
+    protected FormFactoryInterface $formFactory;
 
     public function __construct(
         DOMJudgeService $dj,
@@ -72,13 +58,9 @@ class ClarificationController extends BaseController
 
     /**
      * @Route("/clarifications/{clarId<\d+>}", name="team_clarification")
-     * @param Request $request
-     * @param int     $clarId
-     * @return \Symfony\Component\HttpFoundation\Response
-     * @throws \Doctrine\ORM\NonUniqueResultException
-     * @throws \Exception
+     * @throws NonUniqueResultException
      */
-    public function viewAction(Request $request, int $clarId)
+    public function viewAction(Request $request, int $clarId): Response
     {
         $categories = $this->config->get('clar_categories');
         $user       = $this->dj->getUser();
@@ -88,21 +70,22 @@ class ClarificationController extends BaseController
         $clarification = $this->em->createQueryBuilder()
             ->from(Clarification::class, 'c')
             ->leftJoin('c.problem', 'p')
+            ->leftJoin('c.contest', 'co')
             ->leftJoin('p.contest_problems', 'cp', Join::WITH, 'cp.contest = :contest')
-            ->select('c')
+            ->select('c, p, co')
             ->andWhere('c.contest = :contest')
             ->andWhere('c.clarid = :clarId')
-            ->setParameter(':contest', $contest)
-            ->setParameter(':clarId', $clarId)
+            ->setParameter('contest', $contest)
+            ->setParameter('clarId', $clarId)
             ->getQuery()
             ->getOneOrNullResult();
 
         $formData = [];
         if ($clarification) {
-            if ($clarification->getProbid()) {
-                $formData['subject'] = sprintf('%d-%d', $clarification->getCid(), $clarification->getProbid());
+            if ($clarification->getProblem()) {
+                $formData['subject'] = sprintf('%d-%d', $clarification->getContest()->getCid(), $clarification->getProblem()->getProbid());
             } else {
-                $formData['subject'] = sprintf('%d-%s', $clarification->getCid(), $clarification->getQueue());
+                $formData['subject'] = sprintf('%d-%s', $clarification->getContest()->getCid(), $clarification->getQueue());
             }
 
             $message = '';
@@ -133,12 +116,12 @@ class ClarificationController extends BaseController
             throw new HttpException(401, 'Permission denied');
         }
 
-        // Get the "parent" message if we have one
+        // Get the "parent" message if we have one.
         if ($clarification->getInReplyTo()) {
             $clarification = $clarification->getInReplyTo();
         }
 
-        // Mark clarification as read
+        // Mark clarification as read.
         $team->removeUnreadClarification($clarification);
         foreach ($clarification->getReplies() as $reply) {
             $team->removeUnreadClarification($reply);
@@ -161,11 +144,8 @@ class ClarificationController extends BaseController
 
     /**
      * @Route("/clarifications/add", name="team_clarification_add")
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
-     * @throws \Exception
      */
-    public function addAction(Request $request)
+    public function addAction(Request $request): Response
     {
         $categories = $this->config->get('clar_categories');
         $user       = $this->dj->getUser();
@@ -198,19 +178,16 @@ class ClarificationController extends BaseController
     }
 
     /**
-     * @param \Symfony\Component\Form\FormInterface $form
-     * @param \App\Entity\Contest|null $contest
-     * @param \App\Entity\Team $team
-     * @throws \Doctrine\ORM\NonUniqueResultException
+     * @throws NonUniqueResultException
      */
     private function newClarificationHelper(
-        \Symfony\Component\Form\FormInterface $form,
-        ?\App\Entity\Contest $contest,
-        \App\Entity\Team $team
+        FormInterface $form,
+        ?Contest $contest,
+        Team $team
     ): void {
         $formData = $form->getData();
-        // First part will always be the contest ID, as Symfony will validate this
-        list(, $problemId) = explode('-', $formData['subject']);
+        // First part will always be the contest ID, as Symfony will validate this.
+        [, $problemId] = explode('-', $formData['subject']);
         $problem = null;
         $category = null;
         $queue = null;

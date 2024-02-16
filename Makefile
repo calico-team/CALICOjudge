@@ -5,7 +5,7 @@
 export TOPDIR = $(shell pwd)
 
 REC_TARGETS=build domserver install-domserver judgehost install-judgehost \
-            docs install-docs
+            docs install-docs inplace-install inplace-uninstall
 
 # Global Makefile definitions
 include $(TOPDIR)/Makefile.global
@@ -18,7 +18,6 @@ default:
 	@echo " - make build       (all except 'docs')"
 	@echo " - make domserver"
 	@echo " - make judgehost"
-	@echo " - make submitclient"
 	@echo " - make docs"
 	@echo or
 	@echo " - make install-domserver"
@@ -39,39 +38,29 @@ install:
 all: build
 build: domserver judgehost
 
-ifeq ($(SUBMITCLIENT_ENABLED),yes)
-build: submitclient
-endif
-
 ifeq ($(BUILD_DOCS),yes)
 all: docs
 dist: distdocs
 endif
 
 # MAIN TARGETS
-domserver judgehost docs submitclient: paths.mk config
-submitclient:
-	$(MAKE) -C submit submitclient
+domserver judgehost docs: paths.mk config
 install-domserver: domserver domserver-create-dirs
 install-judgehost: judgehost judgehost-create-dirs
 install-docs: docs-create-dirs
-dist: configure composer-dependencies composer-package-versions
+dist: configure composer-dependencies
 
 # Install PHP dependencies
 composer-dependencies:
-ifeq (, $(shell which composer))
+ifeq (, $(shell command -v composer 2> /dev/null))
 	$(error "'composer' command not found in $(PATH), install it via your package manager or https://getcomposer.org/download/")
 endif
 # We use --no-scripts here because at this point the autoload.php file is
 # not generated yet, which is needed to run the post-install scripts.
-	composer $(subst 1,-q,$(QUIET)) install --prefer-dist -o --no-scripts
+	composer $(subst 1,-q,$(QUIET)) install --prefer-dist -o -a --no-scripts --no-plugins
 
 composer-dependencies-dev:
-	composer $(subst 1,-q,$(QUIET)) install --prefer-dist --no-scripts
-
-# Write composer version information, needed for Doctrine migrations
-composer-package-versions:
-	composer $(subst 1,-q,$(QUIET)) run-script package-versions-dump
+	composer $(subst 1,-q,$(QUIET)) install --prefer-dist --no-scripts --no-plugins
 
 # Generate documentation for distribution. Remove this dependency from
 # dist above for quicker building from git sources.
@@ -88,17 +77,19 @@ build-scripts:
 	$(MAKE) -C sql build-scripts
 
 # List of SUBDIRS for recursive targets:
-build:             SUBDIRS=        lib                      import tests misc-tools
-domserver:         SUBDIRS=etc         sql                  import       misc-tools webapp
-install-domserver: SUBDIRS=etc     lib sql                  import       misc-tools webapp
-judgehost:         SUBDIRS=etc                 judge                     misc-tools
-install-judgehost: SUBDIRS=etc     lib         judge                     misc-tools
+build:             SUBDIRS=        lib           misc-tools
+domserver:         SUBDIRS=etc         sql       misc-tools webapp
+install-domserver: SUBDIRS=etc     lib sql       misc-tools webapp example_problems
+judgehost:         SUBDIRS=etc             judge misc-tools
+install-judgehost: SUBDIRS=etc     lib     judge misc-tools
 docs:              SUBDIRS=    doc
-install-docs:      SUBDIRS=    doc                                                  webapp
-dist:              SUBDIRS=        lib sql                               misc-tools
-clean:             SUBDIRS=etc doc lib sql     judge submit        tests misc-tools webapp
-distclean:         SUBDIRS=etc doc lib sql     judge submit import tests misc-tools webapp
-maintainer-clean:  SUBDIRS=etc doc lib sql     judge submit import tests misc-tools webapp
+install-docs:      SUBDIRS=    doc
+inplace-install:   SUBDIRS=    doc               misc-tools
+inplace-uninstall: SUBDIRS=    doc               misc-tools
+dist:              SUBDIRS=        lib sql       misc-tools
+clean:             SUBDIRS=etc doc lib sql judge misc-tools webapp
+distclean:         SUBDIRS=etc doc lib sql judge misc-tools webapp
+maintainer-clean:  SUBDIRS=etc doc lib sql judge misc-tools webapp
 
 domserver-create-dirs:
 	$(INSTALL_DIR) $(addprefix $(DESTDIR),$(domserver_dirs))
@@ -124,7 +115,7 @@ install-domserver-l:
 		$(INSTALL_WEBSITE) -m 0775 -d $(DESTDIR)$(domserver_webappdir)/var/$$d ; \
 	done
 # Make sure that domjudge user and webserver group can write to var/{cache,log}:
-	DESTDIR=$(DESTDIR) $(domserver_bindir)/fix_permissions
+	-DESTDIR=$(DESTDIR) $(DESTDIR)$(domserver_bindir)/fix_permissions
 # Special case create tmpdir here, only when FHS not enabled:
 ifneq "$(FHS_ENABLED)" "yes"
 	-$(INSTALL_WEBSITE) -m 0770 -d $(DESTDIR)$(domserver_tmpdir)
@@ -182,7 +173,9 @@ paths.mk:
 MAINT_CXFLAGS=-g -O1 -Wall -fstack-protector -D_FORTIFY_SOURCE=2 \
               -fPIE -Wformat -Wformat-security -pedantic
 MAINT_LDFLAGS=-fPIE -pie -Wl,-z,relro -Wl,-z,now
-maintainer-conf: dist composer-dependencies-dev
+maintainer-conf: inplace-conf-common composer-dependencies-dev webapp/.env.local
+inplace-conf: inplace-conf-common composer-dependencies
+inplace-conf-common: dist
 	./configure $(subst 1,-q,$(QUIET)) --prefix=$(CURDIR) \
 	            --with-domserver_root=$(CURDIR) \
 	            --with-judgehost_root=$(CURDIR) \
@@ -202,14 +195,16 @@ maintainer-conf: dist composer-dependencies-dev
 
 # Run Symfony in dev mode (for maintainer-mode):
 webapp/.env.local:
-	echo "# This file was automatically created by 'make maintainer-install' to run" >> $@
+	echo "# This file was automatically created by 'make maintainer-conf' to run" > $@
 	echo "# the DOMjudge Symfony application in developer mode. Adjust as needed." >> $@
 	echo "APP_ENV=dev" >> $@
 
 # Install the system in place: don't really copy stuff, but create
 # symlinks where necessary to let it work from the source tree.
 # This stuff is a hack!
-maintainer-install: build domserver-create-dirs judgehost-create-dirs webapp/.env.local
+maintainer-install: inplace-install
+inplace-install: build domserver-create-dirs judgehost-create-dirs
+inplace-install-l:
 # Replace libjudgedir with symlink to prevent lots of symlinks:
 	-rmdir $(judgehost_libjudgedir)
 	-rm -f $(judgehost_libjudgedir)
@@ -219,9 +214,8 @@ maintainer-install: build domserver-create-dirs judgehost-create-dirs webapp/.en
 	ln -sf $(CURDIR)/judge/judgedaemon $(judgehost_bindir)
 	ln -sf $(CURDIR)/judge/runguard $(judgehost_bindir)
 	ln -sf $(CURDIR)/judge/runpipe  $(judgehost_bindir)
+	ln -sf $(CURDIR)/judge/create_cgroups  $(judgehost_bindir)
 	ln -sf $(CURDIR)/sql/dj_setup_database $(domserver_bindir)
-	$(MAKE) -C misc-tools maintainer-install
-	$(MAKE) -C doc/manual maintainer-install
 # Create tmpdir and make tmpdir writable for webserver,
 # because judgehost-create-dirs sets wrong permissions:
 	$(MKDIR_P) $(domserver_tmpdir)
@@ -232,16 +226,17 @@ maintainer-install: build domserver-create-dirs judgehost-create-dirs webapp/.en
 	@echo "========== Maintainer Install Completed =========="
 	@echo ""
 	@echo "Next:"
+	@echo "    - Configure apache2"
+	@echo "        sudo make inplace-postinstall-apache"
+	@echo "    - Configure nginx"
+	@echo "        sudo make inplace-postinstall-nginx"
 	@echo "    - Set up database"
 	@echo "        ./sql/dj_setup_database -u root [-r|-p ROOT_PASS] install"
-	@echo "    - Configure apache2"
-	@echo "        sudo make maintainer-postinstall-apache"
-	@echo "    - Configure nginx"
-	@echo "        sudo make maintainer-postinstall-nginx"
 	@echo ""
 	@echo "Or you can run these commands manually as root"
 	@echo "    - Give the webserver access to things it needs"
 	@echo "        setfacl    -m   u:$(WEBSERVER_GROUP):r    $(CURDIR)/etc/dbpasswords.secret"
+	@echo "        setfacl    -m   u:$(WEBSERVER_GROUP):r    $(CURDIR)/etc/symfony_app.secret"
 	@echo "        setfacl -R -m d:u:$(WEBSERVER_GROUP):rwx  $(CURDIR)/webapp/var"
 	@echo "        setfacl -R -m   u:$(WEBSERVER_GROUP):rwx  $(CURDIR)/webapp/var"
 	@echo "        setfacl -R -m d:m::rwx          $(CURDIR)/webapp/var"
@@ -257,14 +252,15 @@ maintainer-install: build domserver-create-dirs judgehost-create-dirs webapp/.en
 	@echo "           systemctl restart apache2"
 	@echo "        Nginx + PHP-FPM:"
 	@echo "           ln -sf $(CURDIR)/etc/nginx-conf /etc/nginx/sites-enabled/"
-	@echo "           ln -sf $(CURDIR)/etc/domjudge-fpm /etc/php/7.0/fpm/pool.d/domjudge.conf"
+	@echo "           ln -sf $(CURDIR)/etc/domjudge-fpm /etc/php/$(PHPVERSION)/fpm/pool.d/domjudge.conf"
 	@echo "           systemctl restart nginx"
 	@echo "           systemctl restart php-fpm"
 	@echo ""
 	@echo "The admin password for the web interface is in etc/initial_admin_password.secret"
 
-maintainer-postinstall-permissions:
+inplace-postinstall-permissions:
 	setfacl    -m   u:$(WEBSERVER_GROUP):r    $(CURDIR)/etc/dbpasswords.secret
+	setfacl    -m   u:$(WEBSERVER_GROUP):r    $(CURDIR)/etc/symfony_app.secret
 	setfacl -R -m d:u:$(WEBSERVER_GROUP):rwx  $(CURDIR)/webapp/var
 	setfacl -R -m   u:$(WEBSERVER_GROUP):rwx  $(CURDIR)/webapp/var
 	setfacl -R -m d:u:$(DOMJUDGE_USER):rwx    $(CURDIR)/webapp/var
@@ -272,33 +268,31 @@ maintainer-postinstall-permissions:
 	setfacl -R -m d:m::rwx                    $(CURDIR)/webapp/var
 	setfacl -R -m   m::rwx                    $(CURDIR)/webapp/var
 
-maintainer-postinstall-apache: maintainer-postinstall-permissions
+inplace-postinstall-apache: inplace-postinstall-permissions
 	@if [ ! -d "/etc/apache2/conf-enabled" ]; then echo "Couldn't find directory /etc/apache2/conf-enabled. Is apache installed?"; false; fi
 	ln -sf $(CURDIR)/etc/apache.conf /etc/apache2/conf-available/domjudge.conf
 	a2enconf domjudge
 	a2enmod rewrite headers
 	systemctl restart apache2
 
-maintainer-postinstall-nginx: maintainer-postinstall-permissions
+inplace-postinstall-nginx: inplace-postinstall-permissions
 	@if [ ! -d "/etc/nginx/sites-enabled/" ]; then echo "Couldn't find directory /etc/nginx/sites-enabled/. Is nginx installed?"; false; fi
-	@if [ ! -d "/etc/php/7.0/fpm/pool.d/" ]; then echo "Couldn't find directory /etc/php/7.0/fpm/pool.d/. Is php-fpm installed?"; false; fi
+	@if [ ! -d "/etc/php/$(PHPVERSION)/fpm/pool.d/" ]; then echo "Couldn't find directory /etc/php/$(PHPVERSION)/fpm/pool.d/. Is php-fpm installed?"; false; fi
 	ln -sf $(CURDIR)/etc/nginx-conf /etc/nginx/sites-enabled/domjudge.conf
-	ln -sf $(CURDIR)/etc/domjudge-fpm.conf /etc/php/7.0/fpm/pool.d/domjudge-fpm.conf
+	ln -sf $(CURDIR)/etc/domjudge-fpm.conf /etc/php/$(PHPVERSION)/fpm/pool.d/domjudge-fpm.conf
 	systemctl restart nginx
-	systemctl restart php7.0-fpm
+	systemctl restart php$(PHPVERSION)-fpm
 
 # Removes created symlinks; generated logs, submissions, etc. remain in output subdir.
-maintainer-uninstall:
-	rm -f $(judgehost_libjudgedir)
+inplace-uninstall-l:
+	rm -rf $(judgehost_libjudgedir)
 	rm -rf $(judgehost_bindir)
 
 # Rules to configure and build for a Coverity scan.
 coverity-conf:
-	$(MAKE) maintainer-conf
+	$(MAKE) inplace-conf
 
 coverity-build: paths.mk
-# First delete some files to keep Coverity scan happy:
-	-rm -f tests/test-compile-error.*
 	$(MAKE) build build-scripts
 # Secondly, delete all upstream PHP libraries to not analyze those:
 	-rm -rf lib/vendor/*
@@ -317,6 +311,7 @@ clean-l:
 distclean-l: clean-autoconf
 	-rm -f paths.mk
 
+maintainer-clean: inplace-uninstall
 maintainer-clean-l:
 	-rm -f configure aclocal.m4
 
@@ -324,7 +319,7 @@ clean-autoconf:
 	-rm -rf config.status config.cache config.log autom4te.cache
 
 .PHONY: $(addsuffix -create-dirs,domserver judgehost docs) check-root \
-        clean-autoconf $(addprefix maintainer-,conf install uninstall) \
-        config submitclient distdocs composer-dependencies \
-        composer-dependencies-dev \
+        $(addprefix inplace-,conf conf-common install uninstall) \
+        $(addprefix maintainer-,conf install) clean-autoconf config distdocs \
+        composer-dependencies composer-dependencies-dev \
         coverity-conf coverity-build

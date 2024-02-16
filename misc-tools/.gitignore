@@ -1,11 +1,7 @@
-/balloons
-/simulate_contest
-/create_accounts
-/judging_statistics
-/multi_rejudge
 /fix_permissions
+/configure-domjudge
+/import-contest
 /dj_make_chroot
 /dj_make_chroot_docker
 /dj_run_chroot
 /dj_judgehost_cleanup
-/icpctools

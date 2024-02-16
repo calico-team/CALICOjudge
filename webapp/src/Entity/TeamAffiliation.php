@@ -6,23 +6,21 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use JMS\Serializer\Annotation as Serializer;
+use OpenApi\Annotations as OA;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
-
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\Validator\Constraints as Assert;
 
 /**
- * Affilitations for teams (e.g.: university, company)
+ * Affilitations for teams (e.g.: university, company).
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="team_affiliation",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Affilitations for teams (e.g.: university, company)"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Affilitations for teams (e.g.: university, company)"},
  *     uniqueConstraints={
- *         @ORM\UniqueConstraint(name="externalid", columns={"externalid"}, options={"lengths": {"190"}}),
+ *         @ORM\UniqueConstraint(name="externalid", columns={"externalid"}, options={"lengths": {190}}),
  *     })
- * @Serializer\VirtualProperty(
- *     "icpcId",
- *     exp="object.getAffilid()",
- *     options={@Serializer\Type("string")}
- * )
  * @Serializer\VirtualProperty(
  *     "shortName",
  *     exp="object.getShortname()",
@@ -30,10 +28,9 @@ use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
  * )
  * @UniqueEntity("externalid")
  */
-class TeamAffiliation extends BaseApiEntity
+class TeamAffiliation extends BaseApiEntity implements AssetEntityInterface
 {
     /**
-     * @var int
      * @ORM\Id
      * @ORM\GeneratedValue(strategy="AUTO")
      * @ORM\Column(type="integer", name="affilid", length=4,
@@ -42,244 +39,225 @@ class TeamAffiliation extends BaseApiEntity
      * @Serializer\SerializedName("id")
      * @Serializer\Type("string")
      */
-    protected $affilid;
+    protected ?int $affilid = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="externalid", length=255,
      *     options={"comment"="Team affiliation ID in an external system",
-     *              "collation"="utf8mb4_bin","default"="NULL"},
+     *              "collation"="utf8mb4_bin"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    protected $externalid;
+    protected ?string $externalid = null;
 
     /**
-     * @var string
+     * @ORM\Column(type="string", name="icpcid", length=255,
+     *     options={"comment"="External identifier from ICPC CMS",
+     *              "collation"="utf8mb4_bin"},
+     *     nullable=true)
+     * @Serializer\SerializedName("icpc_id")
+     * @OA\Property(nullable=true)
+     */
+    protected ?string $icpcid = null;
+
+    /**
      * @ORM\Column(type="string", name="shortname", length=32,
      *     options={"comment"="Short descriptive name"}, nullable=false)
      * @Serializer\SerializedName("name")
      */
-    private $shortname;
+    private string $shortname;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="name", length=255,
      *     options={"comment"="Descriptive name"}, nullable=false)
      * @Serializer\SerializedName("formal_name")
      */
-    private $name;
+    private string $name;
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=3, name="country",
-     *     options={"comment"="ISO 3166-1 alpha-3 country code","default"="NULL",
-     *              "fixed"=true},
+     *     options={"comment"="ISO 3166-1 alpha-3 country code","fixed"=true},
      *     nullable=true)
      * @Serializer\Expose(if="context.getAttribute('config_service').get('show_flags')")
      * @Country()
+     * @OA\Property(nullable=true)
      */
-    private $country;
+    private ?string $country = null;
 
     /**
-     * @var string
-     * @ORM\Column(type="text", length=4294967295, name="comments",
-     *     options={"comment"="Comments","default"="NULL"},
+     * @Assert\File(mimeTypes={"image/png","image/jpeg","image/svg+xml"}, mimeTypesMessage="Only PNG's, JPG's and SVG's are allowed")
+     * @Serializer\Exclude()
+     */
+    private ?UploadedFile $logoFile = null;
+
+    /**
+     * @Serializer\Exclude()
+     */
+    private bool $clearLogo = false;
+
+    /**
+     * @ORM\Column(type="text", length=4294967295, name="internalcomments",
+     *     options={"comment"="Internal comments (jury only)"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $comments;
+    private ?string $internalComments;
 
     /**
      * @ORM\OneToMany(targetEntity="Team", mappedBy="affiliation")
      * @Serializer\Exclude()
      */
-    private $teams;
+    private Collection $teams;
 
-    /**
-     * Constructor
-     */
     public function __construct()
     {
-        $this->teams = new \Doctrine\Common\Collections\ArrayCollection();
+        $this->teams = new ArrayCollection();
     }
 
-    /**
-     * Set affilid
-     *
-     * @param integer affilid
-     *
-     * @return TeamAffiliation
-     */
-    public function setAffilid($affilid)
+    public function setAffilid(int $affilid): TeamAffiliation
     {
         $this->affilid = $affilid;
-
         return $this;
     }
 
 
-    /**
-     * Get affilid
-     *
-     * @return integer
-     */
-    public function getAffilid()
+    public function getAffilid(): ?int
     {
         return $this->affilid;
     }
 
-    /**
-     * Set externalid
-     *
-     * @param string $externalid
-     *
-     * @return TeamAffiliation
-     */
-    public function setExternalid($externalid)
+    public function setExternalid(?string $externalid): TeamAffiliation
     {
         $this->externalid = $externalid;
-
         return $this;
     }
 
-    /**
-     * Get externalid
-     *
-     * @return string
-     */
-    public function getExternalid()
+    public function getExternalid(): ?string
     {
         return $this->externalid;
     }
 
-    /**
-     * Set shortname
-     *
-     * @param string $shortname
-     *
-     * @return TeamAffiliation
-     */
-    public function setShortname($shortname)
+    public function setIcpcid(?string $icpcid): TeamAffiliation
     {
-        $this->shortname = $shortname;
-
+        $this->icpcid = $icpcid;
         return $this;
     }
 
-    /**
-     * Get shortname
-     *
-     * @return string
-     */
-    public function getShortname()
+    public function getIcpcid(): ?string
+    {
+        return $this->icpcid;
+    }
+
+    public function setShortname(string $shortname): TeamAffiliation
+    {
+        // Truncate shortname here to make the import more robust. TODO: is this the right place/behavior?
+        $this->shortname = mb_substr($shortname, 0, 32);
+        return $this;
+    }
+
+    public function getShortname(): ?string
     {
         return $this->shortname;
     }
 
-    /**
-     * Set name
-     *
-     * @param string $name
-     *
-     * @return TeamAffiliation
-     */
-    public function setName($name)
+    public function setName(string $name): TeamAffiliation
     {
         $this->name = $name;
-
         return $this;
     }
 
-    /**
-     * Get name
-     *
-     * @return string
-     */
-    public function getName()
+    public function getName(): ?string
     {
         return $this->name;
     }
 
-    /**
-     * Set country
-     *
-     * @param string $country
-     *
-     * @return TeamAffiliation
-     */
-    public function setCountry($country)
+    public function getShortDescription(): ?string
+    {
+        return $this->getName();
+    }
+
+    public function setCountry(?string $country): TeamAffiliation
     {
         $this->country = $country;
-
         return $this;
     }
 
-    /**
-     * Get country
-     *
-     * @return string
-     */
-    public function getCountry()
+    public function getCountry(): ?string
     {
         return $this->country;
     }
 
-    /**
-     * Set comments
-     *
-     * @param string $comments
-     *
-     * @return TeamAffiliation
-     */
-    public function setComments($comments)
+    public function setInternalComments(?string $comments): TeamAffiliation
     {
-        $this->comments = $comments;
-
+        $this->internalComments = $comments;
         return $this;
     }
 
-    /**
-     * Get comments
-     *
-     * @return string
-     */
-    public function getComments()
+    public function getInternalComments(): ?string
     {
-        return $this->comments;
+        return $this->internalComments;
     }
 
-    /**
-     * Add team
-     *
-     * @param \App\Entity\Team $team
-     *
-     * @return TeamAffiliation
-     */
-    public function addTeam(\App\Entity\Team $team)
+    public function getLogoFile(): ?UploadedFile
+    {
+        return $this->logoFile;
+    }
+
+    public function setLogoFile(?UploadedFile $logoFile): TeamAffiliation
+    {
+        $this->logoFile = $logoFile;
+        return $this;
+    }
+
+    public function isClearLogo(): bool
+    {
+        return $this->clearLogo;
+    }
+
+    public function setClearLogo(bool $clearLogo): TeamAffiliation
+    {
+        $this->clearLogo = $clearLogo;
+        return $this;
+    }
+
+    public function addTeam(Team $team): TeamAffiliation
     {
         $this->teams[] = $team;
-
         return $this;
     }
 
-    /**
-     * Remove team
-     *
-     * @param \App\Entity\Team $team
-     */
-    public function removeTeam(\App\Entity\Team $team)
+    public function removeTeam(Team $team): void
     {
         $this->teams->removeElement($team);
     }
 
-    /**
-     * Get teams
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getTeams()
+    public function getTeams(): Collection
     {
         return $this->teams;
+    }
+
+    public function getAssetProperties(): array
+    {
+        return ['logo'];
+    }
+
+    public function getAssetFile(string $property): ?UploadedFile
+    {
+        switch ($property) {
+            case 'logo':
+                return $this->getLogoFile();
+        }
+
+        return null;
+    }
+
+    public function isClearAsset(string $property): ?bool
+    {
+        switch ($property) {
+            case 'logo':
+                return $this->isClearLogo();
+        }
+
+        return null;
     }
 }

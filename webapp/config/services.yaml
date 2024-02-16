@@ -5,6 +5,9 @@
 # https://symfony.com/doc/current/best_practices/configuration.html#application-related-configuration
 parameters:
     locale: en
+    # Enable this to support removing time intervals from the contest.
+    # This code is rarely tested and we discourage using it.
+    removed_intervals: false
 
 services:
     # default configuration for services in *this* file
@@ -15,7 +18,9 @@ services:
             $debug: '%kernel.debug%'
             $domjudgeVersion: '%domjudge.version%'
             $projectDir: '%kernel.project_dir%'
+            $vendorDir: '%domjudge.libvendordir%'
             $cacheDir: '%kernel.cache_dir%'
+            $logsDir: '%kernel.logs_dir%'
             $sqlDir: '%domjudge.sqldir%'
             $etcDir: '%domjudge.etcdir%'
 
@@ -23,7 +28,7 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/*'
-        exclude: '../src/{DependencyInjection,Entity,Migrations,Kernel.php}'
+        exclude: '../src/{DependencyInjection,Entity,Migrations,FosRestBundle,Kernel.php}'
 
     # controllers are imported separately to make sure services can be injected
     # as action arguments even if you don't extend any base controller class
@@ -31,32 +36,25 @@ services:
         resource: '../src/Controller'
         tags: ['controller.service_arguments']
 
-    App\ApiDescriber\ParameterRefMergeDescriber:
-        tags:
-            -   name: nelmio_api_doc.describer
-                priority: -999
-
     App\Doctrine\HashPasswordSubscriber:
         tags:
             - { name: doctrine.event_subscriber, connection: default }
-
 
     App\Logger\VarargsLogMessageProcessor:
         autowire: true
         tags:
             - { name: monolog.processor }
 
-    fos_rest.exception.controller:
+    fos_rest.serializer.flatten_exception_handler:
         public: true
-        class: App\FosRestBundle\ExceptionController
+        class: App\FosRestBundle\FlattenExceptionHandler
         arguments:
-            - '@fos_rest.view_handler'
-            - '@fos_rest.exception.codes_map'
+            - '@fos_rest.exception.messages_map'
             - '%kernel.debug%'
 
     Metadata\MetadataFactoryInterface: '@jms_serializer.metadata_factory'
 
-    # We need the configuration serivce to be public to be able to run two of the migrations
+    # We need the configuration service to be public to be able to run two of the migrations
     App\Service\ConfigurationService:
         public: true
         arguments:

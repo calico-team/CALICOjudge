@@ -2,22 +2,32 @@
 
 namespace App\Twig;
 
+use App\Entity\BaseApiEntity;
 use App\Entity\Contest;
+use App\Entity\ContestProblem;
 use App\Entity\ExternalJudgement;
+use App\Entity\ExternalSourceWarning;
 use App\Entity\Judging;
+use App\Entity\JudgingRun;
 use App\Entity\Language;
 use App\Entity\Submission;
 use App\Entity\SubmissionFile;
 use App\Entity\Testcase;
+use App\Service\AwardService;
 use App\Service\ConfigurationService;
 use App\Service\DOMJudgeService;
 use App\Service\EventLogService;
 use App\Service\SubmissionService;
 use App\Utils\Utils;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\EntityManagerInterface;
 use SebastianBergmann\Diff\Differ;
+use Symfony\Component\Intl\Countries;
+use Symfony\Component\Intl\Exception\MissingResourceException;
+use Symfony\Component\PropertyAccess\PropertyAccess;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
+use Twig\Environment;
 use Twig\Extension\AbstractExtension;
 use Twig\Extension\GlobalsInterface;
 use Twig\TwigFilter;
@@ -25,89 +35,72 @@ use Twig\TwigFunction;
 
 class TwigExtension extends AbstractExtension implements GlobalsInterface
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * @var SubmissionService
-     */
-    protected $submissionService;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * @var TokenStorageInterface
-     */
-    protected $tokenStorage;
-
-    /**
-     * @var AuthorizationCheckerInterface
-     */
-    protected $authorizationChecker;
-
-    /**
-     * @var string
-     */
-    protected $projectDir;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected Environment $twig;
+    protected EntityManagerInterface $em;
+    protected SubmissionService $submissionService;
+    protected EventLogService $eventLogService;
+    protected AwardService $awards;
+    protected TokenStorageInterface $tokenStorage;
+    protected AuthorizationCheckerInterface $authorizationChecker;
+    protected string $projectDir;
 
     public function __construct(
-        DOMJudgeService $dj,
-        ConfigurationService $config,
-        EntityManagerInterface $em,
-        SubmissionService $submissionService,
-        EventLogService $eventLogService,
-        TokenStorageInterface $tokenStorage,
+        DOMJudgeService               $dj,
+        ConfigurationService          $config,
+        Environment                   $twig,
+        EntityManagerInterface        $em,
+        SubmissionService             $submissionService,
+        EventLogService               $eventLogService,
+        AwardService                  $awards,
+        TokenStorageInterface         $tokenStorage,
         AuthorizationCheckerInterface $authorizationChecker,
-        string $projectDir
+        string                        $projectDir
     ) {
         $this->dj                   = $dj;
         $this->config               = $config;
+        $this->twig                 = $twig;
         $this->em                   = $em;
         $this->submissionService    = $submissionService;
         $this->eventLogService      = $eventLogService;
+        $this->awards               = $awards;
         $this->tokenStorage         = $tokenStorage;
         $this->authorizationChecker = $authorizationChecker;
         $this->projectDir           = $projectDir;
     }
 
-    public function getFunctions()
+    public function getFunctions(): array
     {
         return [
             new TwigFunction('button', [$this, 'button'], ['is_safe' => ['html']]),
             new TwigFunction('calculatePenaltyTime', [$this, 'calculatePenaltyTime']),
             new TwigFunction('showExternalId', [$this, 'showExternalId']),
+            new TwigFunction('customAssetFiles', [$this, 'customAssetFiles']),
+            new TwigFunction('globalBannerAssetPath', [$this->dj, 'globalBannerAssetPath']),
         ];
     }
 
-    public function getFilters()
+    public function getFilters(): array
     {
         return [
             new TwigFilter('printtimediff', [$this, 'printtimediff']),
+            new TwigFilter('printremainingminutes', [$this, 'printremainingminutes']),
             new TwigFilter('printtime', [$this, 'printtime']),
             new TwigFilter('printtimeHover', [$this, 'printtimeHover'], ['is_safe' => ['html']]),
             new TwigFilter('printResult', [$this, 'printResult'], ['is_safe' => ['html']]),
             new TwigFilter('printValidJuryResult', [$this, 'printValidJuryResult'], ['is_safe' => ['html']]),
+            new TwigFilter('printValidJurySubmissionResult', [$this, 'printValidJurySubmissionResult'],
+                           ['is_safe' => ['html']]),
             new TwigFilter('printHost', [$this, 'printHost'], ['is_safe' => ['html']]),
+            new TwigFilter('printHosts', [$this, 'printHosts'], ['is_safe' => ['html']]),
+            new TwigFilter('printFiles', [$this, 'printFiles'], ['is_safe' => ['html']]),
+            new TwigFilter('printLazyMode', [$this, 'printLazyMode']),
             new TwigFilter('printYesNo', [$this, 'printYesNo']),
             new TwigFilter('printSize', [Utils::class, 'printSize'], ['is_safe' => ['html']]),
             new TwigFilter('testcaseResults', [$this, 'testcaseResults'], ['is_safe' => ['html']]),
             new TwigFilter('displayTestcaseResults', [$this, 'displayTestcaseResults'],
-                                   ['is_safe' => ['html']]),
+                           ['is_safe' => ['html']]),
             new TwigFilter('externalCcsUrl', [$this, 'externalCcsUrl']),
             new TwigFilter('lineCount', [$this, 'lineCount']),
             new TwigFilter('base64', 'base64_encode'),
@@ -118,73 +111,89 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
             new TwigFilter('codeEditor', [$this, 'codeEditor'], ['is_safe' => ['html']]),
             new TwigFilter('showDiff', [$this, 'showDiff'], ['is_safe' => ['html']]),
             new TwigFilter('printContestStart', [$this, 'printContestStart']),
-            new TwigFilter('assetExists', [$this, 'assetExists']),
+            new TwigFilter('assetPath', [$this->dj, 'assetPath']),
             new TwigFilter('printTimeRelative', [$this, 'printTimeRelative']),
             new TwigFilter('scoreTime', [$this, 'scoreTime']),
             new TwigFilter('statusClass', [$this, 'statusClass']),
-            new TwigFilter('statusIcon', [$this, 'statusIcon']),
+            new TwigFilter('statusIcon', [$this, 'statusIcon'], ['is_safe' => ['html']]),
+            new TwigFilter('countryFlag', [$this, 'countryFlag'], ['is_safe' => ['html']]),
+            new TwigFilter('affiliationLogo', [$this, 'affiliationLogo'], ['is_safe' => ['html']]),
             new TwigFilter('descriptionExpand', [$this, 'descriptionExpand'], ['is_safe' => ['html']]),
             new TwigFilter('wrapUnquoted', [$this, 'wrapUnquoted']),
             new TwigFilter('hexColorToRGBA', [$this, 'hexColorToRGBA']),
             new TwigFilter('tsvField', [$this, 'toTsvField']),
+            new TwigFilter('fileTypeIcon', [$this, 'fileTypeIcon']),
+            new TwigFilter('problemBadge', [$this, 'problemBadge'], ['is_safe' => ['html']]),
+            new TwigFilter('printMetadata', [$this, 'printMetadata'], ['is_safe' => ['html']]),
+            new TwigFilter('printWarningContent', [$this, 'printWarningContent'], ['is_safe' => ['html']]),
+            new TwigFilter('entityIdBadge', [$this, 'entityIdBadge'], ['is_safe' => ['html']]),
+            new TwigFilter('medalType', [$this->awards, 'medalType']),
+            new TwigFilter('numTableActions', [$this, 'numTableActions']),
         ];
     }
 
-    public function getGlobals()
+    public function getGlobals(): array
     {
         $refresh_cookie = $this->dj->getCookie("domjudge_refresh");
         $refresh_flag   = ($refresh_cookie == null || (bool)$refresh_cookie);
 
-        require_once $this->dj->getDomjudgeEtcDir() . '/domserver-config.php';
-
         $user = $this->dj->getUser();
         $team = $user ? $user->getTeam() : null;
 
-        // These variables mostly exist for the header template
+        // These variables mostly exist for the header template.
         return [
-            'current_contest' => $this->dj->getCurrentContest(),
-            'current_contests' => $this->dj->getCurrentContests(),
-            'current_public_contest' => $this->dj->getCurrentContest(-1),
-            'current_public_contests' => $this->dj->getCurrentContests(-1),
-            'have_printing' => $this->config->get('print_command'),
-            'refresh_flag' => $refresh_flag,
-            'icat_url' => defined('ICAT_URL') ? ICAT_URL : null,
-            'external_ccs_submission_url' => $this->config->get('external_ccs_submission_url'),
-            'current_team_contest' => $team ? $this->dj->getCurrentContest($user->getTeamid()) : null,
-            'current_team_contests' => $team ? $this->dj->getCurrentContests($user->getTeamid()) : null,
-            'submission_languages' => $this->em->createQueryBuilder()
-                ->from(Language::class, 'l')
-                ->select('l')
-                ->andWhere('l.allowSubmit = 1')
-                ->getQuery()
-                ->getResult(),
-            'alpha3_countries' => Utils::ALPHA3_COUNTRIES,
-            'show_shadow_differences' => $this->tokenStorage->getToken() &&
-                                         $this->authorizationChecker->isGranted('ROLE_ADMIN') &&
-                                         $this->config->get('data_source') === DOMJudgeService::DATA_SOURCE_CONFIGURATION_AND_LIVE_EXTERNAL,
+            'current_contest_id'            => $this->dj->getCurrentContestCookie(),
+            'current_contest'               => $this->dj->getCurrentContest(),
+            'current_contests'              => $this->dj->getCurrentContests(),
+            'current_public_contest'        => $this->dj->getCurrentContest(-1),
+            'current_public_contests'       => $this->dj->getCurrentContests(-1),
+            'have_printing'                 => $this->config->get('print_command'),
+            'refresh_flag'                  => $refresh_flag,
+            'icat_url'                      => $this->config->get('icat_url'),
+            'external_ccs_submission_url'   => $this->config->get('external_ccs_submission_url'),
+            'current_team_contest'          => $team ? $this->dj->getCurrentContest($team->getTeamid()) : null,
+            'current_team_contests'         => $team ? $this->dj->getCurrentContests($team->getTeamid()) : null,
+            'submission_languages'          => $this->em->createQueryBuilder()
+                                                        ->from(Language::class, 'l')
+                                                        ->select('l')
+                                                        ->andWhere('l.allowSubmit = 1')
+                                                        ->getQuery()
+                                                        ->getResult(),
+            'alpha3_countries'              => Countries::getAlpha3Names(),
+            'alpha3_alpha2_country_mapping' => array_combine(
+                Countries::getAlpha3Codes(),
+                array_map(fn($alpha3) => Countries::getAlpha2Code($alpha3), Countries::getAlpha3Codes())
+            ),
+            'show_shadow_differences'       => $this->tokenStorage->getToken() &&
+                                               $this->authorizationChecker->isGranted('ROLE_ADMIN') &&
+                                               $this->config->get('data_source') === DOMJudgeService::DATA_SOURCE_CONFIGURATION_AND_LIVE_EXTERNAL,
+            'doc_links'                     => $this->dj->getDocLinks(),
         ];
     }
 
-    /**
-     * Print the time difference between two times
-     * @param float      $start
-     * @param float|null $end
-     * @return string
-     */
-    public function printtimediff(float $start, float $end = null): string
+    public function printtimediff(float $start, ?float $end = null): string
     {
         return Utils::printtimediff($start, $end);
     }
 
+    public function printremainingminutes(float $start, float $end): string
+    {
+        $minutesRemaining = floor(($end - $start)/60);
+        if ($minutesRemaining < 1) {
+            return 'less than 1 minute to go';
+        } elseif ($minutesRemaining == 1) {
+            return '1 minute to go';
+        } else {
+            return $minutesRemaining . ' minutes to go';
+        }
+    }
+
     /**
-     * Print a time formatted as specified. The format is according to strftime().
+     * Print a time formatted as specified. The format is according to date().
      * @param string|float $datetime
-     * @param string|null  $format
      * @param Contest|null $contest If given, print time relative to that contest start.
-     * @return string
-     * @throws \Exception
      */
-    public function printtime($datetime, string $format = null, Contest $contest = null): string
+    public function printtime($datetime, ?string $format = null, ?Contest $contest = null): string
     {
         if ($datetime === null) {
             $datetime = Utils::now();
@@ -224,46 +233,46 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
      *
      * @param string|float $datetime
      * @param Contest|null $contest If given, print time relative to that contest start.
-     * @return string
-     * @throws \Exception
      */
-    public function printtimeHover($datetime, Contest $contest = null): string
+    public function printtimeHover($datetime, ?Contest $contest = null): string
     {
         if ($datetime === null) {
             $datetime = Utils::now();
         }
         return '<span title="' .
-            Utils::printtime($datetime, '%Y-%m-%d %H:%M (%Z)') . '">' .
-            $this->printtime($datetime, null, $contest) .
-            '</span>';
+               Utils::printtime($datetime, 'Y-m-d H:i:s (T)') . '">' .
+               $this->printtime($datetime, null, $contest) .
+               '</span>';
     }
 
-    /**
-     * print a yes/no field
-     * @param bool $val
-     * @return string
-     */
+    public static function printLazyMode(?int $val): string
+    {
+        switch ($val) {
+            case false:
+                return "-";
+            case DOMJudgeService::EVAL_DEMAND:
+                return "On demand";
+            case DOMJudgeService::EVAL_FULL:
+                return "No";
+            case DOMJudgeService::EVAL_LAZY:
+                return "Yes";
+            default:
+                return "Unknown mode $val";
+        }
+    }
+
     public static function printYesNo(bool $val): string
     {
         return $val ? 'Yes' : 'No';
     }
 
-    /**
-     * render a button
-     * @param string      $url
-     * @param string      $text
-     * @param string      $type
-     * @param string|null $icon
-     * @param bool        $isAjaxModal
-     * @return string
-     */
     public function button(
-        string $url,
-        string $text,
-        string $type = 'primary',
-        string $icon = null,
-        bool $isAjaxModal = false
-    ) {
+        string  $url,
+        string  $text,
+        string  $type = 'primary',
+        ?string $icon = null,
+        bool    $isAjaxModal = false
+    ): string {
         if ($icon) {
             $icon = sprintf('<i class="fas fa-%s"></i>&nbsp;', $icon);
         }
@@ -276,11 +285,6 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         }
     }
 
-    /**
-     * Map user/team/judgehost status to a cssclass
-     * @param string $status
-     * @return string
-     */
     public static function statusClass(string $status): string
     {
         switch ($status) {
@@ -296,11 +300,6 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
-    /**
-     * Map user/team/judgehost status to an icon
-     * @param string $status
-     * @return string
-     */
     public static function statusIcon(string $status): string
     {
         switch ($status) {
@@ -317,48 +316,81 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
                 $icon = 'check';
                 break;
             default:
-                return $status;
+                return 'unknown';
         }
-        return sprintf('<i class="fas fa-%s-circle"></i>', $icon);
+        return sprintf('<i class="fas fa-%s-circle" aria-hidden="true"></i><span class="sr-only">%s</span>', $icon,
+                       $status);
     }
 
-    /**
-     * Output the testcase results for the given submissions
-     * @param Submission $submission
-     * @param bool       $external If true, show external testcase results
-     * @return string
-     */
-    public function testcaseResults(Submission $submission, bool $external = false)
+    public function countryFlag(?string $alpha3CountryCode, bool $showFullname = false): string
+    {
+        if (empty($alpha3CountryCode)) {
+            return '';
+        }
+
+        try {
+            $countryAlpha2 = strtolower(Countries::getAlpha2Code($alpha3CountryCode));
+        } catch (MissingResourceException $e) {
+            return '';
+        }
+        $assetFunction  = $this->twig->getFunction('asset')->getCallable();
+        $countryFlagUrl = call_user_func($assetFunction, sprintf('flags/4x3/%s.svg', $countryAlpha2));
+
+        $countryName    = Countries::getAlpha3Name($alpha3CountryCode);
+
+        if ($showFullname) {
+            return sprintf('<img src="%s" alt="" class="countryflag"> %s',
+                           $countryFlagUrl, $countryName);
+        }
+        return sprintf('<img loading="lazy" src="%s" alt="%s" title="%s" class="countryflag">',
+           $countryFlagUrl, $alpha3CountryCode, $countryName);
+    }
+
+    public function affiliationLogo(string $affiliationId, string $shortName): string
+    {
+        if ($asset = $this->dj->assetPath($affiliationId, 'affiliation')) {
+            $assetFunction = $this->twig->getFunction('asset')->getCallable();
+            $assetUrl      = call_user_func($assetFunction, $asset);
+            return sprintf('<img src="%s" alt="%s" class="affiliation-logo">',
+                           Utils::specialchars($assetUrl), Utils::specialchars($shortName));
+        }
+
+        return '';
+    }
+
+    public function testcaseResults(Submission $submission, ?bool $showExternal = false): string
     {
         // We use a direct SQL query here for performance reasons
-        if ($external) {
+        if ($showExternal) {
             /** @var ExternalJudgement|null $externalJudgement */
             $externalJudgement   = $submission->getExternalJudgements()->first();
             $externalJudgementId = $externalJudgement ? $externalJudgement->getExtjudgementid() : null;
-            $probId              = $submission->getProbid();
-            $testcases           = $this->em->getConnection()->fetchAll(
-                'SELECT er.result as runresult, t.rank, t.description
+            $probId              = $submission->getProblem()->getProbid();
+            $testcases           = $this->em->getConnection()->fetchAllAssociative(
+                'SELECT er.result as runresult, t.ranknumber, t.description
                   FROM testcase t
                   LEFT JOIN external_run er ON (er.testcaseid = t.testcaseid
                                               AND er.extjudgementid = :extjudgementid)
-                  WHERE t.probid = :probid ORDER BY rank',
-                [':extjudgementid' => $externalJudgementId, ':probid' => $probId]);
+                  WHERE t.probid = :probid ORDER BY ranknumber',
+                ['extjudgementid' => $externalJudgementId, 'probid' => $probId]);
 
-            $submissionDone = $externalJudgement ? !empty($externalJudgement->getEndtime()) : false;
+            $submissionDone = $externalJudgement && !empty($externalJudgement->getEndtime());
         } else {
             /** @var Judging|null $judging */
             $judging   = $submission->getJudgings()->first();
             $judgingId = $judging ? $judging->getJudgingid() : null;
-            $probId    = $submission->getProbid();
-            $testcases = $this->em->getConnection()->fetchAll(
-                'SELECT r.runresult, t.rank, t.description
+            $probId    = $submission->getProblem()->getProbid();
+            $testcases = $this->em->getConnection()->fetchAllAssociative(
+                'SELECT r.runresult, jh.hostname, jt.valid, t.ranknumber, t.description
                   FROM testcase t
                   LEFT JOIN judging_run r ON (r.testcaseid = t.testcaseid
                                               AND r.judgingid = :judgingid)
-                  WHERE t.probid = :probid ORDER BY rank',
-                [':judgingid' => $judgingId, ':probid' => $probId]);
+                  LEFT JOIN judgetask jt ON (r.judgetaskid = jt.judgetaskid)
+                  LEFT JOIN judgehost jh on (jt.judgehostid = jh.judgehostid)
+                  WHERE t.probid = :probid ORDER BY ranknumber',
+                ['judgingid' => $judgingId, 'probid' => $probId]);
 
-            $submissionDone = $judging ? !empty($judging->getEndtime()) : false;
+            $submissionDone = $judging && !empty($judging->getEndtime());
         }
 
         $results = '';
@@ -373,6 +405,11 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
                     $text  = '✓';
                     $class = 'success';
                 }
+            } elseif (array_key_exists('valid', $testcase) && !$testcase['valid']) {
+                $text = '✕';
+            } elseif (array_key_exists('hostname', $testcase) && $testcase['hostname'] !== null) {
+                $text  = '↺';
+                $class = 'info';
             }
 
             if (!empty($testcase['description'])) {
@@ -389,47 +426,45 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         return $results;
     }
 
-    /**
-     * Display testcase results
-     *
-     * TODO: this function shares a lot with the above one, unify them?
-     *
-     * @param Testcase[] $testcases
-     * @param bool       $submissionDone
-     * @param bool       $isExternal
-     * @return string
-     */
-    public function displayTestcaseResults(array $testcases, bool $submissionDone, bool $isExternal = false)
+    // TODO: this function shares a lot with the above one, unify them?
+    public function displayTestcaseResults(array $testcases, bool $submissionDone, bool $isExternal = false): string
     {
+        /** @var Testcase[] $testcases */
         $results = '';
         $lastTypeSample = true;
         foreach ($testcases as $testcase) {
             if ($testcase->getSample() != $lastTypeSample) {
-                $results .= ' | ';
+                $results        .= ' | ';
                 $lastTypeSample = $testcase->getSample();
             }
 
             $class     = $submissionDone ? 'secondary' : 'primary';
             $text      = '?';
             $isCorrect = false;
-            $run       = $isExternal ? $testcase->getFirstExternalRun() : $testcase->getFirstJudgingRun();
+            /** @var JudgingRun $run */
+            $run = $isExternal ? $testcase->getFirstExternalRun() : $testcase->getFirstJudgingRun();
             if ($isExternal) {
                 $runResult = $run ? $run->getResult() : null;
             } else {
                 $runResult = $run ? $run->getRunresult() : null;
             }
 
-            if ($run && $runResult !== null) {
-                $text  = substr($runResult, 0, 1);
-                $class = 'danger';
-                if ($runResult === Judging::RESULT_CORRECT) {
-                    $isCorrect = true;
-                    $text      = '✓';
-                    $class     = 'success';
+            if ($run) {
+                if ($runResult !== null) {
+                    $text  = substr($runResult, 0, 1);
+                    $class = 'danger';
+                    if ($runResult === Judging::RESULT_CORRECT) {
+                        $isCorrect = true;
+                        $text      = '✓';
+                        $class     = 'success';
+                    }
+                } elseif ($run->getJudgeTask()->getJudgehost() !== null) {
+                    $text  = '↺';
+                    $class = 'info';
                 }
             }
 
-            $titleElements = array("#" . $testcase->getRank());
+            $titleElements = ["#" . $testcase->getRank()];
             if (!empty($testcase->getOrigInputFilename())) {
                 $titleElements[] = "name: " . $testcase->getOrigInputFilename();
             }
@@ -443,7 +478,7 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
                 $titleElements[] = sprintf('runtime: %ss', $run->getRuntime());
                 $titleElements[] = sprintf('result: %s', $runResult);
             }
-            $icon     = sprintf('<span class="badge badge-%s badge-testcase">%s</span>', $class, $text);
+            $icon    = sprintf('<span class="badge badge-%s badge-testcase">%s</span>', $class, $text);
             $results .= sprintf('<a title="%s" href="#run-%d" %s>%s</a>',
                                 join(', ', $titleElements), $testcase->getRank(),
                                 $isCorrect ? 'onclick="display_correctruns(true);"' : '', $icon);
@@ -452,14 +487,7 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         return $results;
     }
 
-    /**
-     * Print the given result
-     * @param string $result
-     * @param bool   $valid
-     * @param bool   $jury
-     * @return string
-     */
-    public function printResult($result, bool $valid = true, bool $jury = false): string
+    public function printResult(?string $result, bool $valid = true, bool $jury = false): string
     {
         switch ($result) {
             case 'too-late':
@@ -472,6 +500,8 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
             case 'judging':
             case 'queued':
             case 'pending':
+            case 'aborted':
+            case 'n / a':
                 if (!$jury) {
                     $result = 'pending';
                 }
@@ -487,33 +517,63 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         return sprintf('<span class="sol %s">%s</span>', $valid ? $style : 'disabled', $result);
     }
 
-    /**
-     * Print the given result for the jury, assuming it is valid
-     * @param string $result
-     * @return string
-     */
-    public function printValidJuryResult($result): string
+    public function printValidJuryResult(?string $result): string
     {
         return $this->printResult($result, true, true);
     }
 
-    /**
-     * Return the URL to an external CCS for the given submission if available
-     * @param Submission $submission
-     * @return string|null
-     * @throws \Exception
-     */
-    public function externalCcsUrl(Submission $submission)
+    public function printValidJurySubmissionResult(Submission $submission, bool $forDisplay = true): string
     {
-        require_once $this->dj->getDomjudgeEtcDir() . '/domserver-config.php';
+        /** @var Judging|null $firstJudging */
+        $firstJudging  = $submission->getJudgings()->first();
+        $judgingResult = '';
+        if ($firstJudging) {
+            $judgingResult = $forDisplay
+                ? $this->printValidJuryResult($firstJudging->getResult())
+                : $firstJudging->getResult();
+        }
+        $output = $forDisplay ? '' : 'queued';
+        if ($submission->getSubmittime() > $submission->getContest()->getEndtime()) {
+            if ($forDisplay) {
+                $output .= $this->printValidJuryResult('too-late');
+            }
+            if ($firstJudging && $firstJudging->getResult()) {
+                if ($forDisplay) {
+                    $output .= ' (' . $judgingResult . ')';
+                } else {
+                    $output = $judgingResult;
+                }
+            }
+        } elseif (!$firstJudging || !$firstJudging->getResult()) {
+            if ($firstJudging && $firstJudging->isStarted()) {
+                $output = $forDisplay ? $this->printValidJuryResult('') : 'judging';
+            } else {
+                $output = $forDisplay ? $this->printValidJuryResult('queued') : 'queued';
+            }
+        } else {
+            $output = $judgingResult;
+        }
 
+        if ($forDisplay && $submission->isStillBusy()) {
+            $output .= ' (&hellip;)';
+        }
+
+        return $output;
+    }
+
+    public function externalCcsUrl(Submission $submission): ?string
+    {
         $extCcsUrl = $this->config->get('external_ccs_submission_url');
         if (!empty($extCcsUrl)) {
             $dataSource = $this->config->get('data_source');
-            if ($dataSource == 2) {
-                return str_replace(['[contest]', '[id]'], [$submission->getContest()->getExternalid(), $submission->getExternalid()], $extCcsUrl);
+            if ($dataSource == 2 && $submission->getExternalid()) {
+                return str_replace(['[contest]', '[id]'],
+                                   [$submission->getContest()->getExternalid(), $submission->getExternalid()],
+                                   $extCcsUrl);
             } elseif ($dataSource == 1) {
-                return str_replace(['[contest]', '[id]'], [$submission->getContest()->getExternalid(), $submission->getSubmitid()], $extCcsUrl);
+                return str_replace(['[contest]', '[id]'],
+                                   [$submission->getContest()->getExternalid(), $submission->getSubmitid()],
+                                   $extCcsUrl);
             }
         }
 
@@ -521,14 +581,34 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
     }
 
     /**
+     * Prints the first file (and potentially the number of additional files).
+     */
+    public function printFiles(Collection $files): string
+    {
+        $files = $files->toArray();
+        if (empty($files)) {
+            // Should not happen, but better do something reasonable here if it would.
+            return "source code";
+        }
+        $firstFile = $files[0]->getFilename();
+        if (count($files) == 1) {
+            return sprintf('<span class="hostname">%s</span>', Utils::specialchars($firstFile));
+        }
+        return sprintf('<span class="filename">%s</span> (and %d more)',
+                       Utils::specialchars($firstFile),
+                       count($files) - 1
+        );
+    }
+
+    /**
      * Formats a given hostname. If $full = true, then the full hostname will be printed,
      * else only the local part (for keeping tables readable)
-     * @param string $hostname
-     * @param bool   $full
-     * @return string
      */
-    public function printHost(string $hostname, bool $full = false): string
+    public function printHost(?string $hostname, bool $full = false): string
     {
+        if ($hostname === null) {
+            return '<span class="nodata">hostname unset</span>';
+        }
         // Shorten the hostname to first label, but not if it's an IP address.
         if (!$full && !preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $hostname)) {
             $expl     = explode('.', $hostname);
@@ -539,20 +619,80 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
     }
 
     /**
-     * Get the number of lines in a given string
-     * @param string $input
-     * @return int
+     * Extract the longest common prefix of all the provided strings.
      */
+    private function getCommonPrefix(array $strings): string
+    {
+        $common_prefix = $strings[0];
+        foreach ($strings as $string) {
+            $len = strlen($string);
+            while ($len > 0) {
+                if (substr_compare($common_prefix, $string, 0, $len) == 0) {
+                    break;
+                }
+                $len--;
+            }
+            if ($len == 0) {
+                $common_prefix = "";
+                break;
+            }
+            $common_prefix = substr($common_prefix, 0, $len);
+        }
+        return $common_prefix;
+    }
+
+    /**
+     * Formats a list of given hostnames, extracting a common prefix and suffix.
+     */
+    public function printHosts(array $hostnames): string
+    {
+        if (empty($hostnames)) {
+            return "";
+        }
+        if (count($hostnames) == 1) {
+            return $this->printHost($hostnames[0]);
+        }
+        $hostnames = array_unique($hostnames);
+
+        $local_parts = [];
+        foreach ($hostnames as $hostname) {
+            // Shorten the hostname to first label, but not if it's an IP address.
+            if (!preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $hostname)) {
+                $expl     = explode('.', $hostname);
+                $hostname = array_shift($expl);
+            }
+            $local_parts[] = $hostname;
+        }
+
+        // Extract the longest common prefix.
+        $common_prefix = $this->getCommonPrefix($local_parts);
+        $prefix_len = strlen($common_prefix);
+
+        // Extract the longest common suffix.
+        $reversed = array_map('strrev', $local_parts);
+        $common_suffix = strrev($this->getCommonPrefix($reversed));
+        $suffix_len = strlen($common_suffix);
+
+        // Extract the list of remaining parts. This list may contain empty values. If $common_prefix overlaps
+        // $common_suffix, then $common_prefix = $common_suffix = the entire string.
+        $middle_parts = array_map(fn($host) => substr($host, $prefix_len, strlen($host) - $prefix_len - $suffix_len), $local_parts);
+        // Usually the middle parts contain numbers, so use natural sort for them.
+        usort($middle_parts, 'strnatcmp');
+
+        if (empty($common_prefix) && empty($common_suffix)) {
+            // No common prefix nor suffix: list all the names without "{}".
+            return implode(", ", array_map([$this, 'printHost'], $hostnames));
+        } else {
+            $hosts = $common_prefix . "{" . implode(",", $middle_parts) . "}" . $common_suffix;
+            return $this->printHost($hosts, true);
+        }
+    }
+
     public function lineCount(string $input): int
     {
         return mb_substr_count($input, "\n");
     }
 
-    /**
-     * Parse the run diff for a given difftext
-     * @param string $difftext
-     * @return string
-     */
     public function parseRunDiff(string $difftext): string
     {
         $line = strtok($difftext, "\n"); //first line
@@ -561,7 +701,7 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         }
         $return = $line . "\n";
 
-        // Add second line 'team ? reference'
+        // Add second line 'team ? reference'.
         $line   = strtok("\n");
         $return .= $line . "\n";
 
@@ -598,55 +738,61 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         return $return;
     }
 
-    public function interactiveLog(string $log) {
-        $truncated = '/\[output display truncated after \d* B\]$/';
-        $matches = array();
+    public function interactiveLog(string $log, bool $forTeam = false): string
+    {
+        $truncated  = '/\[output display truncated after \d* B\]$/';
+        $matches    = [];
         $truncation = "";
         if (preg_match($truncated, $log, $matches)) {
             $truncation = $matches[0];
-            $log = preg_replace($truncated, "", $log);
+            $log        = preg_replace($truncated, "", $log);
+            $log        = rtrim($log);
         }
-        $header = "<table><tr><th>time</th><th>validator</th><th>submission<th></tr>\n";
+        if ($forTeam) {
+            $header = "<table><tr><th>jury</th><th>your submission<th></tr>\n";
+        } else {
+            $header = "<table><tr><th>time</th><th>validator</th><th>submission<th></tr>\n";
+        }
         $body = "";
-        $idx = 0;
+        $idx  = 0;
         while ($idx < strlen($log)) {
             $slashPos = strpos($log, "/", $idx);
-            if ($slashPos === FALSE) break;
-            $time = substr($log, $idx + 1, $slashPos - $idx - 1);
-            $idx = $slashPos + 1;
+            if ($slashPos === false) {
+                break;
+            }
+            $time     = substr($log, $idx + 1, $slashPos - $idx - 1);
+            $idx      = $slashPos + 1;
             $closePos = strpos($log, "]", $idx);
-            if ($closePos === FALSE) {
+            if ($closePos === false) {
                 break;
             }
             $lenStr = substr($log, $idx, $closePos - $idx);
-            $len = (int)$lenStr;
-            if ($idx + 3 + $len >= strlen($log)) {
+            $len    = (int)$lenStr;
+            $idx    = $closePos + 1;
+            if ($idx >= strlen($log)) {
                 break;
             }
-            $idx = $closePos + 1;
             $is_validator = $log[$idx] == '>';
-            $content = htmlspecialchars(substr($log, $idx + 3, $len));
-            $content = '<td class="output_text">'
-                . str_replace("\n", "\u{21B5}<br/>", $content)
-                . '</td>';
-            $idx += $len + 4;
-            $team = $is_validator ? '<td/>' : $content;
+            $content      = substr($log, $idx + 3, $len);
+            if (empty($content)) {
+                break;
+            }
+            $content   = Utils::specialchars($content);
+            $content   = '<td class="output_text">'
+                         . str_replace("\n", "\u{21B5}<br/>", $content)
+                         . '</td>';
+            $idx       += $len + 4;
+            $team      = $is_validator ? '<td/>' : $content;
             $validator = $is_validator ? $content : '<td/>';
-            $body .= "<tr><td>$time</td>"
-                . $validator
-                . $team
-                . "</tr>\n";
+            $body      .= "<tr>" . ($forTeam ? "" : "<td>$time</td>")
+                          . $validator
+                          . $team
+                          . "</tr>\n";
         }
         return $header . $body . "</table>" . $truncation;
     }
 
-    /**
-     * Output a run diff
-     * @param array $runOutput
-     * @return string
-     * @throws \Exception
-     */
-    public function runDiff(array $runOutput)
+    public function runDiff(array $runOutput): string
     {
         // TODO: can be improved using diffposition.txt
         // FIXME: only show when diffposition.txt is set?
@@ -654,7 +800,7 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
         $lines_team = preg_split('/\n/', trim($runOutput['output_run']));
         $lines_ref  = preg_split('/\n/', trim($runOutput['output_reference']));
 
-        $diffs    = array();
+        $diffs    = [];
         $firstErr = sizeof($lines_team) + 1;
         $lastErr  = -1;
         $n        = min(sizeof($lines_team), sizeof($lines_ref));
@@ -687,23 +833,20 @@ class TwigExtension extends AbstractExtension implements GlobalsInterface
     }
 
     /**
-     * Output a (readonly) code editor for the given submission file
-     * @param string      $code
-     * @param string      $index
-     * @param string|null $language        Ace language to use
-     * @param bool        $editable        Whether to allow editing
-     * @param string      $elementToUpdate HTML element to update when input changes
-     * @param string|null $filename        If $language is null, filename to use to determine language
-     * @return string
+     * Output a (optionally readonly) code editor for the given submission file.
+     * @param string|null $language Ace language to use
+     * @param bool $editable Whether to allow editing
+     * @param string $elementToUpdate HTML element to update when input changes
+     * @param string|null $filename If $language is null, filename to use to determine language
      */
     public function codeEditor(
-        string $code,
-        string $index,
-        string $language = null,
-        bool $editable = false,
-        string $elementToUpdate = '',
-        string $filename = null
-    ) {
+        string  $code,
+        string  $index,
+        ?string $language = null,
+        bool    $editable = false,
+        string  $elementToUpdate = '',
+        ?string $filename = null
+    ): string {
         $editor = <<<HTML
 <div class="editor" id="__EDITOR__">%s</div>
 <script>
@@ -726,7 +869,6 @@ __EDITOR__.getSession().on('change', function() {
     textarea.value = __EDITOR__.getSession().getValue();
 });
 JS;
-
         } else {
             $extraForEdit = '';
         }
@@ -749,13 +891,7 @@ JS;
                            sprintf($editor, $code, $editable ? 'false' : 'true', $mode, $extraForEdit));
     }
 
-
-    /**
-     * Parse the given source diff
-     * @param $difftext
-     * @return string
-     */
-    protected function parseSourceDiff($difftext)
+    protected function parseSourceDiff($difftext): string
     {
         $line   = strtok((string)$difftext, "\n"); // first line
         $return = '';
@@ -778,56 +914,39 @@ JS;
         return $return;
     }
 
-    /**
-     * Show a diff between two files
-     * @param SubmissionFile $newFile
-     * @param SubmissionFile $oldFile
-     * @return string
-     */
-    public function showDiff(SubmissionFile $newFile, SubmissionFile $oldFile)
+    public function showDiff(SubmissionFile $newFile, SubmissionFile $oldFile): string
     {
         $differ = new Differ;
-        return $this->parseSourceDiff($differ->diff($newFile->getSourcecode(), $oldFile->getSourcecode()));
+        return $this->parseSourceDiff($differ->diff($oldFile->getSourcecode(), $newFile->getSourcecode()));
     }
 
-    /**
-     * Print the start time of the given contest
-     * @param Contest $contest
-     * @return string
-     * @throws \Exception
-     */
     public function printContestStart(Contest $contest): string
     {
         $res = "scheduled to start ";
         if (!$contest->getStarttimeEnabled()) {
             $res = "start delayed, was scheduled ";
         }
-        if ($this->printtime(Utils::now(), '%Y%m%d') == $this->printtime($contest->getStarttime(), '%Y%m%d')) {
+        if ($this->printtime(Utils::now(), 'Ymd') == $this->printtime($contest->getStarttime(false), 'Ymd')) {
             // Today
-            $res .= "at " . $this->printtime($contest->getStarttime());
+            $res .= "at " . $this->printtime($contest->getStarttime(false));
         } else {
             // Print full date
-            $res .= "on " . $this->printtime($contest->getStarttime(), '%a %d %b %Y %T %Z');
+            $res .= "on " . $this->printtime($contest->getStarttime(false), 'D d M Y H:i:s T');
         }
         return $res;
     }
 
-    /**
-     * Determine whether the given asset exists
-     * @param string $asset
-     * @return bool
-     */
-    public function assetExists(string $asset): bool
+    public function customAssetFiles(string $type): array
     {
-        $webDir = realpath(sprintf('%s/public', $this->projectDir));
-        return is_readable($webDir . '/' . $asset);
+        if (in_array($type, ['css', 'js'])) {
+            return $this->dj->getAssetFiles("$type/custom");
+        }
+
+        return [];
     }
 
     /**
      * Print the relative time in h:mm:ss[.uuuuuu] format.
-     * @param float $relativeTime
-     * @param bool  $useMicroseconds
-     * @return string
      */
     public function printTimeRelative(float $relativeTime, bool $useMicroseconds = false): string
     {
@@ -860,35 +979,24 @@ JS;
     }
 
     /**
-     * Display the scoretime for the given time
+     * Display the scoretime for the given time.
      * @param string|float $time
-     * @return int
-     * @throws \Exception
      */
-    public function scoreTime($time)
+    public function scoreTime($time): int
     {
         return Utils::scoretime($time, (bool)$this->config->get('score_in_seconds'));
     }
 
-    /**
-     * Calculate the penalty time for the given data
-     * @param bool $solved
-     * @param int  $num_submissions
-     * @return int
-     * @throws \Exception
-     */
-    public function calculatePenaltyTime(bool $solved, int $num_submissions)
+    public function calculatePenaltyTime(bool $solved, int $num_submissions): int
     {
         return Utils::calcPenaltyTime($solved, $num_submissions, (int)$this->config->get('penalty_time'),
                                       (bool)$this->config->get('score_in_seconds'));
     }
 
     /**
-     * Print the given description, collapsing it by default if it is too big
-     * @param string|null $description
-     * @return string
+     * Print the given description, collapsing it by default if it is too big.
      */
-    public function descriptionExpand(string $description = null): string
+    public function descriptionExpand(?string $description = null): string
     {
         if ($description == null) {
             return '';
@@ -913,34 +1021,18 @@ EOF;
     }
 
     /**
-     * Whether to show the external ID for the given entity
      * @param object|string $entity
-     * @return bool
-     * @throws \Exception
      */
-    public function showExternalId($entity): Bool
+    public function showExternalId($entity): bool
     {
         return $this->eventLogService->externalIdFieldForEntity($entity) !== null;
     }
 
-    /**
-     * Wrap unquoted text
-     * @param string $text
-     * @param int    $width
-     * @param string $quote
-     * @return string
-     */
     public function wrapUnquoted(string $text, int $width = 75, string $quote = '>'): string
     {
         return Utils::wrapUnquoted($text, $width, $quote);
     }
 
-    /**
-     * Convert a hex color to RGBA
-     * @param string $text
-     * @param float  $opacity
-     * @return string
-     */
     public function hexColorToRGBA(string $text, float $opacity = 1): string
     {
         $col = Utils::convertToHex($text);
@@ -955,10 +1047,12 @@ EOF;
         $m = current($m);
         switch (count($m)) {
             case 4:
-                // We also have opacity; load that
+                // We also have opacity; load that and use
+                // RGB of case 3
                 $opacity = hexdec(array_pop($m));
+                // no-break
             case 3:
-                $vals = array_map("hexdec", $m);
+                $vals   = array_map("hexdec", $m);
                 $vals[] = $opacity;
 
                 return "rgba(" . implode(",", $vals) . ")";
@@ -967,15 +1061,160 @@ EOF;
         return $text;
     }
 
-    /**
-     * Convert the given string to a field that is safe to use in a TSV file
-     *
-     * @param string $field
-     *
-     * @return string
-     */
-    public function toTsvField(string $field)
+    public function toTsvField(string $field): string
     {
         return Utils::toTsvField($field);
+    }
+
+    public function fileTypeIcon(string $type): string
+    {
+        switch ($type) {
+            case 'pdf':
+                $iconName = 'pdf';
+                break;
+            case 'txt':
+                $iconName = 'alt';
+                break;
+            default:
+                $iconName = 'code';
+                break;
+        }
+
+        return 'fas fa-file-' . $iconName;
+    }
+
+    public function problemBadge(ContestProblem $problem): string
+    {
+        $rgb        = Utils::convertToHex($problem->getColor() ?? '#ffffff');
+        $background = Utils::parseHexColor($rgb);
+
+        // Pick a border that's a bit darker.
+        $darker = $background;
+        $darker[0] = max($darker[0] - 64, 0);
+        $darker[1] = max($darker[1] - 64, 0);
+        $darker[2] = max($darker[2] - 64, 0);
+        $border    = Utils::rgbToHex($darker);
+
+        // Pick the foreground text color based on the background color.
+        $foreground = ($background[0] + $background[1] + $background[2] > 450) ? '#000000' : '#ffffff';
+        return sprintf(
+            '<span class="badge problem-badge" style="background-color: %s; min-width: 28px; border: 1px solid %s"><span style="color: %s;">%s</span></span>',
+            $rgb,
+            $border,
+            $foreground,
+            $problem->getShortname()
+        );
+    }
+
+    public function printMetadata(?string $metadata): string
+    {
+        if ($metadata === null) {
+            return '';
+        }
+        $metadata = $this->dj->parseMetadata($metadata);
+        return '<span style="display:inline; margin-left: 5px;">'
+            . '<i class="fas fa-stopwatch" title="runtime"></i>'
+            . $metadata['cpu-time'] . 's'
+            . ' CPU, '
+            . $metadata['wall-time'] . 's'
+            . ' wall time, '
+            . '<i class="fas fa-memory" title="RAM"></i>'
+            . Utils::printsize((int)($metadata['memory-bytes']))
+            . ', '
+            . '<i class="fas fa-exitcode" title="runtime"></i>'
+            . 'exit-code: ' . $metadata['exitcode'];
+    }
+
+    public function printWarningContent(ExternalSourceWarning $warning): string
+    {
+        switch ($warning->getType()) {
+            case ExternalSourceWarning::TYPE_UNSUPORTED_ACTION:
+                $action = $warning->getContent()['action'];
+                return "Action $action not supported for this entity type";
+            case ExternalSourceWarning::TYPE_DATA_MISMATCH:
+                $rows = [];
+                $null = '&lt;null&gt;';
+                foreach ($warning->getContent()['diff'] as $field => $diff) {
+                    $tdField    = "<td><code>$field</code></td>";
+                    $tdUs       = sprintf(
+                        '<td><code>%s</code></td>',
+                        $diff['us'] === null ? $null : $diff['us']
+                    );
+                    $tdExternal = sprintf(
+                        '<td><code>%s</code></td>',
+                        $diff['external'] === null ? $null : $diff['external']
+                    );
+                    $rows[]     = "<tr>{$tdField}{$tdUs}{$tdExternal}</tr>";
+                }
+
+                $header  = <<<'EOF'
+<thead>
+<tr>
+<th style="width: 20%;">Field</th>
+<th style="width: 40%;">Our value</th>
+<th style="width: 40%;">External value</th>
+</tr>
+</thead>
+EOF;
+                $rowData = implode('', $rows);
+
+                return "<table class='table table-sm table-striped'>$header<tbody>$rowData</tbody></table>";
+            case ExternalSourceWarning::TYPE_DEPENDENCY_MISSING:
+                $rows = [];
+                foreach ($warning->getContent()['dependencies'] as $dependency) {
+                    $type   = $dependency['type'];
+                    $id     = $dependency['id'];
+                    $rows[] = "<tr><td>$type</td><td>$id</td></tr>";
+                }
+                $header  = <<<'EOF'
+<thead>
+<tr>
+<th style="width: 20%;">Type</th>
+<th style="width: 80%;">ID</th>
+</tr>
+</thead>
+EOF;
+                $rowData = implode('', $rows);
+
+                return "<table class='table table-sm table-striped'>$header<tbody>$rowData</tbody></table>";
+            case ExternalSourceWarning::TYPE_ENTITY_NOT_FOUND:
+            case ExternalSourceWarning::TYPE_ENTITY_SHOULD_NOT_EXIST:
+                return '';
+            case ExternalSourceWarning::TYPE_SUBMISSION_ERROR:
+                return $warning->getContent()['message'];
+        }
+
+        return '';
+    }
+
+    /**
+     * Get the entity ID badge to display for the given entity.
+     *
+     * When we are in a data source mode that uses external ID's, those will be used and the
+     * internal ID will be shown in a tooltip.
+     *
+     * @param string $idPrefix The prefix to use for the internal ID, if any.
+     */
+    public function entityIdBadge(BaseApiEntity $entity, string $idPrefix = ''): string
+    {
+        $propertyAccessor = PropertyAccess::createPropertyAccessor();
+        $metadata = $this->em->getClassMetadata(get_class($entity));
+        $primaryKeyColumn = $metadata->getIdentifierColumnNames()[0];
+        $externalIdField = $this->eventLogService->externalIdFieldForEntity($entity);
+
+        return $this->twig->render('jury/entity_id_badge.html.twig', [
+            'idPrefix' => $idPrefix,
+            'id' => $propertyAccessor->getValue($entity, $primaryKeyColumn),
+            'externalId' => $externalIdField ? $propertyAccessor->getValue($entity, $externalIdField) : null,
+        ]);
+    }
+
+    public function numTableActions(array $tableData): int
+    {
+        $maxNumActions = 0;
+        foreach ($tableData as $item) {
+            $maxNumActions = max($maxNumActions, count($item['actions'] ?? []));
+        }
+        return $maxNumActions;
     }
 }

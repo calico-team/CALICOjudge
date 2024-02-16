@@ -13,9 +13,8 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\Pagination\Paginator;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\Asset\Packages;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 
 /**
@@ -24,34 +23,11 @@ use Symfony\Component\Routing\Annotation\Route;
  */
 class AuditLogController extends AbstractController
 {
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
+    protected EntityManagerInterface $em;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected EventLogService $eventLogService;
 
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * AuditLogController constructor.
-     *
-     * @param EntityManagerInterface $em
-     * @param DOMJudgeService        $dj
-     * @param ConfigurationService   $config
-     * @param EventLogService        $eventLogService
-     */
     public function __construct(
         EntityManagerInterface $em,
         DOMJudgeService $dj,
@@ -67,7 +43,7 @@ class AuditLogController extends AbstractController
     /**
      * @Route("", name="jury_auditlog")
      */
-    public function indexAction(Request $request, Packages $assetPackage, KernelInterface $kernel)
+    public function indexAction(Request $request): Response
     {
         $timeFormat = (string)$this->config->get('time_format');
 
@@ -82,22 +58,19 @@ class AuditLogController extends AbstractController
                     ->orderBy('a.logid', 'DESC');
 
         $paginator = new Paginator($query);
-        if ($showAll) {
-            $paginator->getQuery();
-        } else {
+        if (!$showAll) {
             $paginator->getQuery()
                       ->setFirstResult($limit * ($page - 1))
                       ->setMaxResults($limit);
         }
         $auditlog_table= [];
-        foreach($paginator as $logline) {
-
+        foreach ($paginator as $logline) {
             $data = [];
             $data['id']['value'] = $logline->getLogId();
 
             $time = $logline->getLogTime();
             $data['when']['value'] = Utils::printtime($time, $timeFormat);
-            $data['when']['title'] = Utils::printtime($time, "%Y-%m-%d %H:%M:%S (%Z)");
+            $data['when']['title'] = Utils::printtime($time, "Y-m-d H:i:s (T)");
             $data['when']['sortvalue'] = $time;
 
             $data['who']['value'] = $logline->getUser();
@@ -117,7 +90,7 @@ class AuditLogController extends AbstractController
             }
 
             $cid = $logline->getCid();
-            if ( $cid ) {
+            if ($cid) {
                     $data['where']['value'] = "c" . $cid;
                     $data['where']['sortvalue'] = $cid;
                     $data['where']['link'] = $this->generateUrl('jury_contest', ['contestId' => $cid]);
@@ -148,7 +121,7 @@ class AuditLogController extends AbstractController
         ]);
     }
 
-    private function generateDatatypeUrl(string $type, $id)
+    private function generateDatatypeUrl(string $type, $id): ?string
     {
         switch ($type) {
             case 'balloon':
@@ -164,11 +137,12 @@ class AuditLogController extends AbstractController
             case 'internal_error':
                 return $this->generateUrl('jury_internal_error', ['errorId' => $id]);
             case 'judgehost':
-                return $this->generateUrl('jury_judgehost', ['hostname' => $id]);
+                if ($id) {
+                    return $this->generateUrl('jury_judgehost', ['judgehostid' => $id]);
+                }
+                return $this->generateUrl('jury_judgehosts');
             case 'judgehosts':
                 return $this->generateUrl('jury_judgehosts');
-            case 'judgehost_restriction':
-                return $this->generateUrl('jury_judgehost_restriction', ['restrictionId' => $id]);
             case 'judging':
                 return $this->generateUrl('jury_submission_by_judging', ['jid' => $id]);
             case 'external_judgement':
@@ -186,7 +160,7 @@ class AuditLogController extends AbstractController
             case 'team_category':
                 return $this->generateUrl('jury_team_category', ['categoryId' => $id]);
             case 'user':
-                // Pre 6.1, usernames were stored instead of numeric ids
+                // Pre 6.1, usernames were stored instead of numeric IDs.
                 if (!is_numeric($id)) {
                     $user = $this->em->getRepository(User::class)->findOneBy(['username'=>$id]);
                     $id = $user->getUserId();
@@ -195,7 +169,7 @@ class AuditLogController extends AbstractController
             case 'testcase':
                 $testcase = $this->em->getRepository(Testcase::class)->find($id);
                 if ($testcase) {
-                    return $this->generateUrl('jury_problem_testcases', ['probId' => $testcase->getProbid()]);
+                    return $this->generateUrl('jury_problem_testcases', ['probId' => $testcase->getProblem()->getProbid()]);
                 }
                 break;
         }

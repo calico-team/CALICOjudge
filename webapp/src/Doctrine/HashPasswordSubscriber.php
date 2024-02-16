@@ -4,31 +4,26 @@ namespace App\Doctrine;
 
 use App\Entity\User;
 use Doctrine\Common\EventSubscriber;
-use Doctrine\Common\Persistence\Event\LifecycleEventArgs;
+use Doctrine\ORM\Event\LifecycleEventArgs;
+use Doctrine\ORM\Event\PreUpdateEventArgs;
 use Doctrine\ORM\Events;
-use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 class HashPasswordSubscriber implements EventSubscriber
 {
-    /**
-     * @var UserPasswordEncoderInterface
-     */
-    protected $passwordEncoder;
+    protected UserPasswordHasherInterface $passwordHasher;
 
-    public function __construct(UserPasswordEncoderInterface $passwordEncoder)
+    public function __construct(UserPasswordHasherInterface $passwordHasher)
     {
-        $this->passwordEncoder = $passwordEncoder;
+        $this->passwordHasher = $passwordHasher;
     }
 
-    public function getSubscribedEvents()
+    public function getSubscribedEvents(): array
     {
         return [Events::prePersist, Events::preUpdate];
     }
 
-    /**
-     * @param LifecycleEventArgs $args
-     */
-    public function prePersist(LifecycleEventArgs $args)
+    public function prePersist(LifecycleEventArgs $args): void
     {
         $entity = $args->getObject();
         if (!$entity instanceof User) {
@@ -38,10 +33,7 @@ class HashPasswordSubscriber implements EventSubscriber
         $this->encodePassword($entity);
     }
 
-    /**
-     * @param LifecycleEventArgs $args
-     */
-    public function preUpdate(LifecycleEventArgs $args)
+    public function preUpdate(PreUpdateEventArgs $args): void
     {
         $entity = $args->getObject();
         if (!$entity instanceof User) {
@@ -50,21 +42,18 @@ class HashPasswordSubscriber implements EventSubscriber
 
         $this->encodePassword($entity);
 
-        // necessary to force the update to see the change
+        // Necessary to force the update to see the change.
         $em   = $args->getObjectManager();
         $meta = $em->getClassMetadata(get_class($entity));
         $em->getUnitOfWork()->recomputeSingleEntityChangeSet($meta, $entity);
     }
 
-    /**
-     * @param User $entity
-     */
-    private function encodePassword(User $entity)
+    private function encodePassword(User $entity): void
     {
         if (!$entity->getPlainPassword()) {
             return;
         }
-        $encoded = $this->passwordEncoder->encodePassword(
+        $encoded = $this->passwordHasher->hashPassword(
             $entity,
             $entity->getPlainPassword()
         );

@@ -2,13 +2,13 @@
 
 namespace App\Form\Type;
 
+use App\Entity\Role;
 use App\Entity\Team;
 use App\Entity\TeamAffiliation;
 use App\Entity\TeamCategory;
 use App\Entity\User;
 use App\Service\ConfigurationService;
 use App\Service\DOMJudgeService;
-use App\Utils\Utils;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
 use Symfony\Bridge\Doctrine\Form\Type\EntityType;
@@ -21,6 +21,9 @@ use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Form;
 use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Form\FormEvent;
+use Symfony\Component\Form\FormEvents;
+use Symfony\Component\Intl\Countries;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\Callback;
 use Symfony\Component\Validator\Constraints\Email;
@@ -29,28 +32,10 @@ use Symfony\Component\Validator\Context\ExecutionContext;
 
 class UserRegistrationType extends AbstractType
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected EntityManagerInterface $em;
 
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * UserRegistrationType constructor.
-     *
-     * @param DOMJudgeService        $dj
-     * @param ConfigurationService   $config
-     * @param EntityManagerInterface $em
-     */
     public function __construct(
         DOMJudgeService $dj,
         ConfigurationService $config,
@@ -61,16 +46,22 @@ class UserRegistrationType extends AbstractType
         $this->em     = $em;
     }
 
-    /**
-     * @inheritDoc
-     */
-    public function buildForm(FormBuilderInterface $builder, array $options)
+    public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder
             ->add('username', TextType::class, [
                 'label' => false,
                 'attr' => [
                     'placeholder' => 'Username',
+                    'autocomplete' => 'username',
+                ],
+            ])
+            ->add('name', TextType::class, [
+                'label' => false,
+                'required' => false,
+                'attr' => [
+                    'placeholder' => 'Full name (optional)',
+                    'autocomplete' => 'name',
                 ],
             ])
             ->add('email', EmailType::class, [
@@ -79,6 +70,7 @@ class UserRegistrationType extends AbstractType
                 'required' => false,
                 'attr' => [
                     'placeholder' => 'Email Address (optional)',
+                    'autocomplete' => 'email',
                 ],
                 'constraints' => new Email(),
             ])
@@ -109,12 +101,10 @@ class UserRegistrationType extends AbstractType
                     'mapped' => false,
                     'choice_label' => 'name',
                     'placeholder' => '-- Select category --',
-                    'query_builder' => function (EntityRepository $er) {
-                        return $er
-                            ->createQueryBuilder('c')
-                            ->where('c.allow_self_registration = 1')
-                            ->orderBy('c.sortorder');
-                    },
+                    'query_builder' => fn(EntityRepository $er) => $er
+                        ->createQueryBuilder('c')
+                        ->where('c.allow_self_registration = 1')
+                        ->orderBy('c.sortorder'),
                     'attr' => [
                         'placeholder' => 'Category',
                     ],
@@ -126,8 +116,9 @@ class UserRegistrationType extends AbstractType
 
         if ($this->config->get('show_affiliations')) {
             $countries = [];
-            foreach (Utils::ALPHA3_COUNTRIES as $alpha3 => $country) {
-                $countries["$country ($alpha3)"] = $alpha3;
+            foreach (Countries::getAlpha3Codes() as $alpha3) {
+                $name = Countries::getAlpha3Name($alpha3);
+                $countries["$name ($alpha3)"] = $alpha3;
             }
 
             $builder
@@ -146,6 +137,15 @@ class UserRegistrationType extends AbstractType
                     'required' => false,
                     'attr' => [
                         'placeholder' => 'Affiliation name',
+                    ],
+                    'mapped' => false,
+                ])
+                ->add('affiliationShortName', TextType::class, [
+                    'label' => false,
+                    'required' => false,
+                    'attr' => [
+                        'placeholder' => 'Affiliation shortname',
+                        'maxlength' => '32',
                     ],
                     'mapped' => false,
                 ]);
@@ -180,6 +180,7 @@ class UserRegistrationType extends AbstractType
                     'attr' => [
                         'placeholder' => 'Password',
                         'autocomplete' => 'new-password',
+                        'spellcheck' => 'false',
                     ],
                 ],
                 'second_options' => [
@@ -187,6 +188,7 @@ class UserRegistrationType extends AbstractType
                     'attr' => [
                         'placeholder' => 'Repeat Password',
                         'autocomplete' => 'new-password',
+                        'spellcheck' => 'false',
                     ],
                 ],
                 'mapped' => false,
@@ -198,12 +200,23 @@ class UserRegistrationType extends AbstractType
                 ],
             ]);
 
+        // Make sure the user has the team role to make validation work
+        $builder->addEventListener(FormEvents::PRE_SET_DATA, function (FormEvent $event) {
+            /** @var User $user */
+            $user = $event->getData();
+            /** @var Role $role */
+            $role = $this->em->createQueryBuilder()
+                ->from(Role::class, 'r')
+                ->select('r')
+                ->andWhere('r.dj_role = :team')
+                ->setParameter('team', 'team')
+                ->getQuery()
+                ->getOneOrNullResult();
+            $user->addUserRole($role);
+        });
     }
 
-    /**
-     * @inheritDoc
-     */
-    public function configureOptions(OptionsResolver $resolver)
+    public function configureOptions(OptionsResolver $resolver): void
     {
         $validateAffiliation = function ($data, ExecutionContext $context) {
             if ($this->config->get('show_affiliations')) {
@@ -211,16 +224,18 @@ class UserRegistrationType extends AbstractType
                 $form = $context->getRoot();
                 switch ($form->get('affiliation')->getData()) {
                     case 'new':
-                        $affiliationName = $form->get('affiliationName')->getData();
-                        if (empty($affiliationName)) {
-                            $context->buildViolation('This value should not be blank.')
-                                ->atPath('affiliationName')
-                                ->addViolation();
-                        }
-                        if ($this->em->getRepository(TeamAffiliation::class)->findOneBy(['name' => $affiliationName])) {
-                            $context->buildViolation('This affiliation name is already in use.')
-                                ->atPath('affiliationName')
-                                ->addViolation();
+                        foreach (['Name','ShortName'] as $identifier) {
+                            $name = $form->get('affiliation'.$identifier)->getData();
+                            if (empty($name)) {
+                                $context->buildViolation('This value should not be blank.')
+                                    ->atPath('affiliation'.$identifier)
+                                    ->addViolation();
+                            }
+                            if ($this->em->getRepository(TeamAffiliation::class)->findOneBy([strtolower($identifier) => $name])) {
+                                $context->buildViolation('This affiliation '.strtolower($identifier).' is already in use.')
+                                    ->atPath('affiliation'.$identifier)
+                                    ->addViolation();
+                            }
                         }
                         break;
                     case 'existing':

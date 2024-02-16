@@ -12,13 +12,16 @@ use App\Entity\Team;
 use App\Entity\TeamAffiliation;
 use App\Service\DOMJudgeService;
 use App\Service\ScoreboardService;
+use App\Utils\Utils;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query\Expr\Join;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Annotation\Route;
@@ -33,20 +36,11 @@ use Symfony\Component\Routing\RouterInterface;
  */
 class JuryMiscController extends BaseController
 {
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected EntityManagerInterface $em;
+    protected DOMJudgeService $dj;
 
     /**
      * GeneralInfoController constructor.
-     * @param EntityManagerInterface $entityManager
-     * @param DOMJudgeService        $dj
      */
     public function __construct(EntityManagerInterface $entityManager, DOMJudgeService $dj)
     {
@@ -56,34 +50,64 @@ class JuryMiscController extends BaseController
 
     /**
      * @Route("", name="jury_index")
-     * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_BALLOON')")
+     * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_BALLOON') or is_granted('ROLE_CLARIFICATION_RW')")
      */
-    public function indexAction(Request $request)
+    public function indexAction(): Response
     {
-        $errors = [];
-        return $this->render('jury/index.html.twig', ['errors' => $errors]);
+        return $this->render('jury/index.html.twig');
     }
 
     /**
      * @Route("/updates", methods={"GET"}, name="jury_ajax_updates")
      * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_BALLOON')")
      */
-    public function updatesAction(Request $request)
+    public function updatesAction(): JsonResponse
     {
         return $this->json($this->dj->getUpdates());
     }
 
     /**
      * @Route("/ajax/{datatype}", methods={"GET"}, name="jury_ajax_data")
-     * @param string $datatype
-     * @IsGranted("ROLE_JURY")
+     * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_BALLOON')")
      */
-    public function ajaxDataAction(Request $request, string $datatype)
+    public function ajaxDataAction(Request $request, string $datatype): JsonResponse
     {
         $q  = $request->query->get('q');
         $qb = $this->em->createQueryBuilder();
 
-        if ($datatype === 'problems') {
+        if ($datatype === 'affiliations') {
+            $affiliations = $qb->from(TeamAffiliation::class, 'a')
+                ->select('a.affilid', 'a.name', 'a.shortname')
+                ->where($qb->expr()->like('a.name', '?1'))
+                ->orWhere($qb->expr()->like('a.shortname', '?1'))
+                ->orWhere($qb->expr()->eq('a.affilid', '?2'))
+                ->orderBy('a.name', 'ASC')
+                ->getQuery()->setParameter(1, '%' . $q . '%')
+                ->setParameter(2, $q)
+                ->getResult();
+
+            $results = array_map(function (array $affiliation) {
+                $displayname = $affiliation['name'] . " (" . $affiliation['affilid'] . ")";
+                return [
+                    'id' => $affiliation['affilid'],
+                    'text' => $displayname,
+                ];
+            }, $affiliations);
+        } elseif ($datatype === 'locations') {
+            $locations = $qb->from(Team::class, 'a')
+                ->select('DISTINCT a.room')
+                ->where($qb->expr()->like('a.room', '?1'))
+                ->orderBy('a.room', 'ASC')
+                ->getQuery()->setParameter(1, '%' . $q . '%')
+                ->getResult();
+
+            $results = array_map(fn(array $location) => [
+                'id' => $location['room'],
+                'text' => $location['room']
+            ], $locations);
+        } elseif (!$this->isGranted('ROLE_JURY')) {
+            throw new AccessDeniedHttpException('Permission denied');
+        } elseif ($datatype === 'problems') {
             $problems = $qb->from(Problem::class, 'p')
                 ->select('p.probid', 'p.name')
                 ->where($qb->expr()->like('p.name', '?1'))
@@ -161,24 +185,6 @@ class JuryMiscController extends BaseController
                     'text' => $displayname,
                 ];
             }, $contests);
-        } elseif ($datatype === 'affiliations') {
-            $affiliations = $qb->from(TeamAffiliation::class, 'a')
-                ->select('a.affilid', 'a.name', 'a.shortname')
-                ->where($qb->expr()->like('a.name', '?1'))
-                ->orWhere($qb->expr()->like('a.shortname', '?1'))
-                ->orWhere($qb->expr()->eq('a.affilid', '?2'))
-                ->orderBy('a.name', 'ASC')
-                ->getQuery()->setParameter(1, '%' . $q . '%')
-                ->setParameter(2, $q)
-                ->getResult();
-
-            $results = array_map(function (array $affiliation) {
-                $displayname = $affiliation['name'] . " (" . $affiliation['affilid'] . ")";
-                return [
-                    'id' => $affiliation['affilid'],
-                    'text' => $displayname,
-                ];
-            }, $affiliations);
         } else {
             throw new NotFoundHttpException("Unknown AJAX data type: " . $datatype);
         }
@@ -189,11 +195,8 @@ class JuryMiscController extends BaseController
     /**
      * @Route("/refresh-cache", name="jury_refresh_cache")
      * @IsGranted("ROLE_ADMIN")
-     * @param Request           $request
-     * @param ScoreboardService $scoreboardService
-     * @return \Symfony\Component\HttpFoundation\Response|StreamedResponse
      */
-    public function refreshCacheAction(Request $request, ScoreboardService $scoreboardService)
+    public function refreshCacheAction(Request $request, ScoreboardService $scoreboardService): Response
     {
         // Note: we use a XMLHttpRequest here as Symfony does not support
         // streaming Twig output.
@@ -210,14 +213,12 @@ class JuryMiscController extends BaseController
         }
 
         if ($request->isXmlHttpRequest() && $request->isMethod('POST')) {
-            $progressReporter = function (string $data) {
-                echo $data;
+            $progressReporter = function (int $progress, string $log, ?string $message = null) {
+                echo $this->dj->jsonEncode(['progress' => $progress, 'log' => Utils::specialchars($log), 'message' => $message]);
                 ob_flush();
                 flush();
             };
-            $response         = new StreamedResponse();
-            $response->headers->set('X-Accel-Buffering', 'no');
-            $response->setCallback(function () use ($contests, $progressReporter, $scoreboardService) {
+            return $this->streamResponse(function () use ($contests, $progressReporter, $scoreboardService) {
                 $timeStart = microtime(true);
 
                 foreach ($contests as $contest) {
@@ -226,10 +227,11 @@ class JuryMiscController extends BaseController
 
                 $timeEnd = microtime(true);
 
-                $progressReporter(sprintf('<p>Scoreboard cache refresh completed in %.2lf seconds.</p>',
-                                          $timeEnd - $timeStart));
+                $progressReporter(100, '', sprintf(
+                    'Scoreboard cache refresh completed in %.2lf seconds.',
+                    $timeEnd - $timeStart
+                ));
             });
-            return $response;
         }
 
         return $this->render('jury/refresh_cache.html.twig', [
@@ -241,11 +243,9 @@ class JuryMiscController extends BaseController
 
     /**
      * @Route("/judging-verifier", name="jury_judging_verifier")
-     * @IsGranted("ROLE_ADMIN")
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response|StreamedResponse
+     * @IsGranted("ROLE_JURY")
      */
-    public function judgingVerifierAction(Request $request)
+    public function judgingVerifierAction(Request $request): Response
     {
         /** @var Submission[] $submissions */
         $submissions = [];
@@ -256,7 +256,7 @@ class JuryMiscController extends BaseController
                 ->select('s', 'j')
                 ->andWhere('s.contest IN (:contests)')
                 ->andWhere('j.result IS NOT NULL')
-                ->setParameter(':contests', $contests)
+                ->setParameter('contests', $contests)
                 ->getQuery()
                 ->getResult();
         }
@@ -279,56 +279,38 @@ class JuryMiscController extends BaseController
             /** @var Judging $judging */
             $judging         = $submission->getJudgings()->first();
             $expectedResults = $submission->getExpectedResults();
-            $submissionLink  = $this->generateUrl('jury_submission', ['submitId' => $submission->getSubmitid()]);
-            $submissionId    = sprintf('s%d', $submission->getSubmitid());
+            $submissionId    = $submission->getSubmitid();
 
             if (!empty($expectedResults) && !$judging->getVerified()) {
                 $numChecked++;
                 $result = mb_strtoupper($judging->getResult());
                 if (!in_array($result, $expectedResults)) {
-                    $unexpected[] = sprintf(
-                        "<a href='%s'>%s</a> has unexpected result '%s', should be one of: %s",
-                        $submissionLink, $submissionId, $result, implode(', ', $expectedResults)
-                    );
+                    $submissionFiles = $submission->getFiles();
+                    $unexpected[$submissionId] = ['files' => $submissionFiles, 'actual' => $result, 'expected' => $expectedResults];
                 } elseif (count($expectedResults) > 1) {
                     if ($verifyMultiple) {
-                        // Judging result is as expected, set judging to verified
+                        // Judging result is as expected, set judging to verified.
                         $judging
                             ->setVerified(true)
                             ->setJuryMember($verifier);
-                        $multiple[] = sprintf(
-                            "<a href='%s'>%s</a> verified as %s out of multiple possible outcomes (%s)",
-                            $submissionLink, $submissionId, $result, implode(', ', $expectedResults)
-                        );
+                        $multiple[$submissionId] = ['actual' => $result, 'expected' => $expectedResults, 'verified' => true];
                     } else {
-                        $multiple[] = sprintf(
-                            "<a href='%s'>%s</a> is judged as %s but has multiple possible outcomes (%s)",
-                            $submissionLink, $submissionId, $result, implode(', ', $expectedResults)
-                        );
+                        $multiple[$submissionId] = ['actual' => $result, 'expected' => $expectedResults, 'verified' => false];
                     }
                 } else {
-                    // Judging result is as expected, set judging to verified
+                    // Judging result is as expected, set judging to verified.
                     $judging
                         ->setVerified(true)
                         ->setJuryMember($verifier);
-                    $verified[] = sprintf(
-                        "<a href='%s'>%s</a> verified as '%s'",
-                        $submissionLink, $submissionId, $result
-                    );
+                    $verified[$submissionId] = ['actual' => $result, 'expected' => $expectedResults, 'verified' => true];
                 }
             } else {
                 $numUnchecked++;
 
                 if (empty($expectedResults)) {
-                    $nomatch[] = sprintf(
-                        "expected results unknown in <a href='%s'>%s</a>, leaving submission unchecked",
-                        $submissionLink, $submissionId
-                    );
+                    $nomatch[$submissionId] = [];
                 } else {
-                    $earlier[] = sprintf(
-                        "<a href='%s'>%s</a> already verified earlier",
-                        $submissionLink, $submissionId
-                    );
+                    $earlier[$submissionId] = [];
                 }
             }
         }
@@ -349,14 +331,10 @@ class JuryMiscController extends BaseController
 
     /**
      * @Route("/change-contest/{contestId<-?\d+>}", name="jury_change_contest")
-     * @param Request         $request
-     * @param RouterInterface $router
-     * @param int             $contestId
-     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function changeContestAction(Request $request, RouterInterface $router, int $contestId)
+    public function changeContestAction(Request $request, RouterInterface $router, int $contestId): Response
     {
-        if ($this->isLocalReferrer($router, $request)) {
+        if ($this->isLocalReferer($router, $request)) {
             $response = new RedirectResponse($request->headers->get('referer'));
         } else {
             $response = $this->redirectToRoute('jury_index');

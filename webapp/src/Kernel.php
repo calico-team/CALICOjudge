@@ -2,13 +2,15 @@
 
 namespace App;
 
-use App\DependencyInjection\Compiler\ChangeMainFormAuthenticationListenerPass;
+use App\DependencyInjection\Compiler\RemoveEventFeedImporterChannelFromLogs;
+use App\DependencyInjection\Compiler\SetDocLinksPass;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Component\Config\Loader\LoaderInterface;
 use Symfony\Component\Config\Resource\FileResource;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
-use Symfony\Component\Routing\RouteCollectionBuilder;
+use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
+use function dirname;
 
 class Kernel extends BaseKernel
 {
@@ -28,7 +30,7 @@ class Kernel extends BaseKernel
 
     public function getProjectDir(): string
     {
-        return \dirname(__DIR__);
+        return dirname(__DIR__);
     }
 
     protected function configureContainer(ContainerBuilder $container, LoaderInterface $loader): void
@@ -44,17 +46,18 @@ class Kernel extends BaseKernel
         $loader->load($confDir.'/{static}'.self::CONFIG_EXTS, 'glob');
     }
 
-    protected function configureRoutes(RouteCollectionBuilder $routes): void
+    protected function configureRoutes(RoutingConfigurator $routes): void
     {
         $confDir = $this->getProjectDir().'/config';
 
-        $routes->import($confDir.'/{routes}/'.$this->environment.'/**/*'.self::CONFIG_EXTS, '/', 'glob');
-        $routes->import($confDir.'/{routes}/*'.self::CONFIG_EXTS, '/', 'glob');
-        $routes->import($confDir.'/{routes}'.self::CONFIG_EXTS, '/', 'glob');
+        $routes->import($confDir.'/{routes}/'.$this->environment.'/**/*'.self::CONFIG_EXTS, 'glob');
+        $routes->import($confDir.'/{routes}/*'.self::CONFIG_EXTS, 'glob');
+        $routes->import($confDir.'/{routes}'.self::CONFIG_EXTS, 'glob');
     }
 
-    protected function build(ContainerBuilder $container)
+    protected function build(ContainerBuilder $container): void
     {
-        $container->addCompilerPass(new ChangeMainFormAuthenticationListenerPass());
+        $container->addCompilerPass(new SetDocLinksPass());
+        $container->addCompilerPass(new RemoveEventFeedImporterChannelFromLogs());
     }
 }

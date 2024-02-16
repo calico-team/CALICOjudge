@@ -11,7 +11,6 @@ use JMS\Serializer\EventDispatcher\EventSubscriberInterface;
 use JMS\Serializer\EventDispatcher\ObjectEvent;
 use JMS\Serializer\JsonSerializationVisitor;
 use JMS\Serializer\Metadata\StaticPropertyMetadata;
-use Symfony\Component\Routing\RouterInterface;
 
 /**
  * Class SubmissionVisitor
@@ -19,49 +18,21 @@ use Symfony\Component\Routing\RouterInterface;
  */
 class SubmissionVisitor implements EventSubscriberInterface
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected DOMJudgeService $dj;
+    protected EventLogService $eventLogService;
+    protected EntityManagerInterface $em;
 
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * @var RouterInterface
-     */
-    protected $router;
-
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * SubmissionVisitor constructor.
-     * @param DOMJudgeService        $dj
-     * @param EventLogService        $eventLogService
-     * @param RouterInterface        $router
-     * @param EntityManagerInterface $em
-     */
     public function __construct(
         DOMJudgeService $dj,
         EventLogService $eventLogService,
-        RouterInterface $router,
         EntityManagerInterface $em
     ) {
         $this->dj              = $dj;
         $this->eventLogService = $eventLogService;
-        $this->router          = $router;
         $this->em              = $em;
     }
 
-    /**
-     * @inheritdoc
-     */
-    public static function getSubscribedEvents()
+    public static function getSubscribedEvents(): array
     {
         return [
             [
@@ -73,35 +44,32 @@ class SubmissionVisitor implements EventSubscriberInterface
         ];
     }
 
-    /**
-     * @param ObjectEvent $event
-     * @throws \Exception
-     */
-    public function onPostSerialize(ObjectEvent $event)
+    public function onPostSerialize(ObjectEvent $event): void
     {
-        if ($this->dj->checkrole('jury')) {
+        if ($this->dj->checkrole('api_source_reader')) {
             /** @var JsonSerializationVisitor $visitor */
             $visitor = $event->getVisitor();
             /** @var Submission $submission */
-            $submission         = $event->getObject();
-            $filesRoute         = $this->router->generate(
-                'submission_files',
+            $submission = $event->getObject();
+            $route = $this->dj->apiRelativeUrl(
+                'v4_submission_files',
                 [
                     'cid' => $submission->getContest()->getApiId($this->eventLogService),
-                    'id'  => $submission->getApiId($this->eventLogService)
+                    'id'  => $submission->getExternalid() ?? $submission->getSubmitid(),
                 ]
-            );
-            $apiRootRoute       = $this->router->generate('api_root');
-            $relativeFilesRoute = substr(
-                $filesRoute,
-                strlen($apiRootRoute) + 1 // +1 because api_root does not contain final /
             );
             $property = new StaticPropertyMetadata(
                 Submission::class,
                 'files',
                 null
             );
-            $visitor->visitProperty($property, [['href' => $relativeFilesRoute, 'mime' => 'application/zip']]);
+            $visitor->visitProperty($property, [
+                [
+                    'href'     => $route,
+                    'mime'     => 'application/zip',
+                    'filename' => 'submission.zip',
+                ]
+            ]);
         }
     }
 }

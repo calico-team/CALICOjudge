@@ -22,6 +22,9 @@
                     <div class="card">
                         <div class="card-header">
                             {{ contest.name }} ({{ contest.shortname }} - c{{ contest.cid }})
+                            {% if contest.locked %}
+                                <i class="fas fa-lock"></i>
+                            {% endif %}
                         </div>
                         <div class="card-body">
                             {% if not contest.starttimeEnabled and contest.finalizetime is not empty %}
@@ -31,7 +34,7 @@
                             {% endif %}
                             <table class="table table-hover">
                                 <tbody>
-                                {% for type, data in contest.juryTimeData %}
+                                {% for type, data in contest.dataForJuryInterface %}
                                     <tr>
                                         <td class="{{ data.class|default('') }}">
                                             {% if data.icon is defined %}
@@ -72,7 +75,7 @@
                 <strong>No active contest.</strong> Upcoming:<br/>
                 <p>
                     <i>{{ upcoming_contest.name }} ({{ upcoming_contest.shortname }})</i>;
-                    active from {{ upcoming_contest.activatetime | printtime('%a %d %b %Y %T %Z') }}
+                    active from {{ upcoming_contest.activatetime | printtime('D d M Y H:i:s T') }}
                 </p>
                 <form action="{{ path('jury_contests') }}" method="post">
                     <input type="hidden" name="contest" value="{{ upcoming_contest.cid }}"/>
@@ -84,11 +87,12 @@
 
     <h3>All available contests</h3>
 
-    {{ macros.table(contests_table, table_fields, num_actions) }}
+    {{ macros.table(contests_table, table_fields) }}
 
     {% if is_granted('ROLE_ADMIN') %}
         <p>
             {{ button(path('jury_contest_add'), 'Add new contest', 'primary', 'plus') }}
+            {{ button(path('jury_import_export', {'_fragment':'contests'}), 'Import contest', 'primary', 'upload') }}
         </p>
     {% endif %}
 

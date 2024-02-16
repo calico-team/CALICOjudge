@@ -16,44 +16,23 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Query\Expr\Join;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Annotation\Route;
 
 /**
  * @Route("/jury/clarifications")
- * @IsGranted("ROLE_JURY")
+ * @IsGranted("ROLE_CLARIFICATION_RW")
  */
 class ClarificationController extends AbstractController
 {
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
+    protected EntityManagerInterface $em;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected EventLogService $eventLogService;
 
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * ClarificationController constructor.
-     *
-     * @param EntityManagerInterface $em
-     * @param DOMJudgeService        $dj
-     * @param ConfigurationService   $config
-     * @param EventLogService        $eventLogService
-     */
     public function __construct(
         EntityManagerInterface $em,
         DOMJudgeService $dj,
@@ -68,12 +47,12 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("", name="jury_clarifications")
-     * @throws \Exception
      */
-    public function indexAction(Request $request)
+    public function indexAction(Request $request): Response
     {
+        $categories = $this->config->get('clar_categories');
         $contestIds = array_keys($this->dj->getCurrentContests());
-        // cid -1 will never happen, but otherwise the array is empty and that is not supported
+        // cid -1 will never happen, but otherwise the array is empty and that is not supported.
         if (empty($contestIds)) {
             $contestIds = [-1];
         }
@@ -83,29 +62,27 @@ class ClarificationController extends AbstractController
             $currentFilter = null;
         }
 
-        $currentQueue = $request->query->get('queue');
-        if ($currentQueue === 'all') {
-            $currentQueue = null;
-        }
-
+        // Load the current queue, default to "all".
+        $currentQueue = $request->query->has('queue') ? $request->query->get('queue') : "all";
         $queryBuilder = $this->em->createQueryBuilder()
             ->from(Clarification::class, 'clar')
             ->leftJoin('clar.problem', 'p')
             ->leftJoin('p.contest_problems', 'cp', Join::WITH, 'cp.contest = clar.contest')
             ->select('clar', 'p', 'cp')
-            ->andWhere('clar.cid in (:contestIds)')
-            ->setParameter(':contestIds', $contestIds)
+            ->andWhere('clar.contest in (:contestIds)')
+            ->setParameter('contestIds', $contestIds)
             ->orderBy('clar.submittime', 'DESC')
             ->addOrderBy('clar.clarid', 'DESC');
 
-        if ($currentQueue !== null) {
-            if ($currentQueue === '') {
-                $queryBuilder->andWhere('clar.queue IS NULL');
-            } else {
-                $queryBuilder
-                    ->andWhere('clar.queue = :queue')
-                    ->setParameter(':queue', $currentQueue);
-            }
+        if ($currentQueue === "unassigned") {
+            $queryBuilder->andWhere($queryBuilder->expr()->orX(
+                $queryBuilder->expr()->isNull('clar.queue'),
+                $queryBuilder->expr()->eq('clar.queue', ':queue')
+            ))
+                ->setParameter('queue', $currentQueue);
+        } elseif ($currentQueue !== "all") {
+            $queryBuilder->andWhere('clar.queue = :queue')
+                ->setParameter('queue', $currentQueue);
         }
 
         /**
@@ -117,7 +94,7 @@ class ClarificationController extends AbstractController
         $wheres            = [
             'new' => 'clar.sender IS NOT NULL AND clar.answered = 0',
             'old' => 'clar.sender IS NOT NULL AND clar.answered != 0',
-            'general' => 'clar.sender IS NULL AND (clar.respid IS NULL OR clar.recipient IS NULL)',
+            'general' => 'clar.sender IS NULL AND clar.in_reply_to IS NULL',
         ];
         foreach ($wheres as $type => $where) {
             $clarifications = (clone $queryBuilder)
@@ -148,14 +125,14 @@ class ClarificationController extends AbstractController
             'showExternalId' => $this->eventLogService->externalIdFieldForEntity(Clarification::class),
             'currentQueue' => $currentQueue,
             'currentFilter' => $currentFilter,
+            'categories' => $categories,
         ]);
     }
 
     /**
      * @Route("/{id<\d+>}", name="jury_clarification")
-     * @throws \Exception
      */
-    public function viewAction(Request $request, int $id)
+    public function viewAction(int $id): Response
     {
         /** @var Clarification $clarification */
         $clarification = $this->em->getRepository(Clarification::class)->find($id);
@@ -171,44 +148,45 @@ class ClarificationController extends AbstractController
         $queues     = $this->config->get('clar_queues');
         $clar_answers = $this->config->get('clar_answers');
 
-        if ( $irt = $clarification->getInReplyTo() ) {
-            $clarlist = [$irt];
-            $replies = $irt->getReplies() ?? [];
-            foreach($replies as $clar_reply) { $clarlist[] = $clar_reply; }
-        } else {
-            $clarlist = [$clarification];
-            $replies = $clarification->getReplies() ?? [];
-            foreach($replies as $clar_reply) { $clarlist[] = $clar_reply; }
+        if ($inReplyTo = $clarification->getInReplyTo()) {
+            $clarification = $inReplyTo;
+        }
+        $clarlist = [$clarification];
+        $replies = $clarification->getReplies() ?? [];
+        foreach ($replies as $clar_reply) {
+            $clarlist[] = $clar_reply;
         }
 
         $concernsteam = null;
-        foreach($clarlist as $k => $clar) {
+        foreach ($clarlist as $clar) {
             $data = ['clarid' => $clar->getClarid(), 'externalid' => $clar->getExternalid()];
             $data['time'] = $clar->getSubmittime();
 
             $jurymember = $clar->getJuryMember();
-            if ( !empty($jurymember) ) {
+            if (!empty($jurymember)) {
                 $juryuser = $this->em->getRepository(User::class)->findBy(['username'=>$jurymember]);
                 $data['from_jurymember'] = $juryuser[0]->getName();
                 $data['jurymember_is_me'] = $juryuser[0] == $this->getUser();
             }
 
-            if ( $fromteam = $clar->getSender() ) {
+            if ($fromteam = $clar->getSender()) {
                 $data['from_teamname'] = $fromteam->getEffectiveName();
-                $data['from_teamid'] = $fromteam->getTeamid();
+                $data['from_team'] = $fromteam;
                 $concernsteam = $fromteam->getTeamid();
             }
-            if ( $toteam = $clar->getRecipient() ) {
+            if ($toteam = $clar->getRecipient()) {
                 $data['to_teamname'] = $toteam->getEffectiveName();
-                $data['to_teamid'] = $toteam->getTeamid();
+                $data['to_team'] = $toteam;
             }
 
             $contest = $clar->getContest();
             $data['contest'] = $contest;
             $clarcontest = $contest->getShortname();
-            if ( $clar->getProbId() ) {
-                $concernssubject = $contest->getCid() . "-" . $clar->getProbId();
-            } elseif ( $clar->getCategory() ) {
+            $data['subjectlink'] = null;
+            if ($clar->getProblem()) {
+                $concernssubject = $contest->getCid() . "-" . $clar->getProblem()->getProbid();
+                $data['subjectlink'] = $this->generateUrl('jury_problem', ['probId' => $clar->getProblem()->getProbid()]);
+            } elseif ($clar->getCategory()) {
                 $concernssubject = $contest->getCid() . "-" . $clar->getCategory();
             } else {
                 $concernssubject = "";
@@ -224,14 +202,14 @@ class ClarificationController extends AbstractController
 
             $data['answered'] = $clar->getAnswered();
 
-            $data['body'] = Utils::wrapUnquoted($clar->getBody(), 78);
+            $data['body'] = $clar->getBody();
             $clardata['list'][] = $data;
         }
 
-        if ( $concernsteam ) {
+        if ($concernsteam) {
             $clardata['clarform']['toteam'] = $concernsteam;
         }
-        if ( $concernssubject ) {
+        if ($concernssubject) {
             $clardata['clarform']['onsubject'] = $concernssubject;
         }
 
@@ -244,18 +222,9 @@ class ClarificationController extends AbstractController
         );
     }
 
-    protected function getProblemShortName(int $probid, int $cid) : string
+    protected function getClarificationFormData(?Team $team = null): array
     {
-        $cp = $this->em->getRepository(ContestProblem::class)->findBy(['probid'=>$probid, 'cid' => $cid]);
-        if ( isset($cp[0]) ) {
-            return "problem " . $cp[0]->getShortName();
-        }
-        return "unknown problem";
-    }
-
-    protected function getClarificationFormData(Team $team = null) : array
-    {
-        $em = $this->getDoctrine()->getManager();
+        $em = $this->em;
         if ($team !== null) {
             $teamlist[$team->getTeamid()] = sprintf("%s (t%s)", $team->getEffectiveName(), $team->getTeamid());
         } else {
@@ -280,18 +249,20 @@ class ClarificationController extends AbstractController
             ->select('cp, partial p.{probid,externalid,name}')
             ->innerJoin('cp.problem', 'p')
             ->where('cp.contest IN (:contests)')
-            ->setParameter(':contests', $contests)
+            ->setParameter('contests', $contests)
             ->orderBy('p.probid')
             ->getQuery()->getResult();
 
-        foreach($contests as $cid => $cdata) {
+        foreach ($contests as $cid => $cdata) {
             $cshort = $cdata->getShortName();
-            foreach($categories as $name => $desc) {
+            foreach ($categories as $name => $desc) {
                 $subject_options[$cshort]["$cid-$name"] = "$cshort - $desc";
             }
 
-            foreach($contestproblems as $cp) {
-                if ( $cp->getCid()!=$cid ) continue;
+            foreach ($contestproblems as $cp) {
+                if ($cp->getCid()!=$cid) {
+                    continue;
+                }
                 $subject_options[$cshort]["$cid-" . $cp->getProbid()] =
                     $cshort . ' - ' .$cp->getShortname() . ': ' . $cp->getProblem()->getName();
             }
@@ -304,15 +275,14 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/send", methods={"GET"}, name="jury_clarification_new")
-     * @throws \Exception
      */
-    public function composeClarificationAction(Request $request)
+    public function composeClarificationAction(Request $request): Response
     {
-        // TODO: use proper Symfony form for this
+        // TODO: Use a proper Symfony form for this.
 
         $data = $this->getClarificationFormData();
 
-        if ( $toteam = $request->query->get('teamto') ) {
+        if ($toteam = $request->query->get('teamto')) {
             $data['toteam'] = $toteam;
         }
 
@@ -321,11 +291,8 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/{clarId<\d+>}/claim", name="jury_clarification_claim")
-     * @param Request $request
-     * @param int     $clarId
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function toggleClaimAction(Request $request, int $clarId)
+    public function toggleClaimAction(Request $request, int $clarId): Response
     {
         /** @var Clarification $clarification */
         $clarification = $this->em->getReference(Clarification::class, $clarId);
@@ -333,7 +300,7 @@ class ClarificationController extends AbstractController
             throw new NotFoundHttpException(sprintf('Clarification with ID %i not found', $clarId));
         }
 
-        if($request->request->getBoolean('claimed')) {
+        if ($request->request->getBoolean('claimed')) {
             $clarification->setJuryMember($this->getUser()->getUsername());
             $this->em->flush();
             return $this->redirectToRoute('jury_clarification', ['id' => $clarId]);
@@ -346,11 +313,8 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/{clarId<\d+>}/set-answered", name="jury_clarification_set_answered")
-     * @param Request $request
-     * @param int     $clarId
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function toggleAnsweredAction(Request $request, int $clarId)
+    public function toggleAnsweredAction(Request $request, int $clarId): Response
     {
         /** @var Clarification $clarification */
         $clarification = $this->em->getReference(Clarification::class, $clarId);
@@ -362,7 +326,7 @@ class ClarificationController extends AbstractController
         $clarification->setAnswered($answered);
         $this->em->flush();
 
-        if ( $answered ) {
+        if ($answered) {
             return $this->redirectToRoute('jury_clarifications');
         } else {
             return $this->redirectToRoute('jury_clarification', ['id' => $clarId]);
@@ -371,11 +335,8 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/{clarId<\d+>}/change-subject", name="jury_clarification_change_subject")
-     * @param Request $request
-     * @param int     $clarId
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function changeSubjectAction(Request $request, int $clarId)
+    public function changeSubjectAction(Request $request, int $clarId): Response
     {
         /** @var Clarification $clarification */
         $clarification = $this->em->getReference(Clarification::class, $clarId);
@@ -384,7 +345,7 @@ class ClarificationController extends AbstractController
         }
 
         $subject = $request->request->get('subject');
-        list($cid, $probid) = explode('-', $subject);
+        [$cid, $probid] = explode('-', $subject);
 
         $contest = $this->em->getReference(Contest::class, $cid);
         $clarification->setContest($contest);
@@ -405,11 +366,8 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/{clarId<\d+>}/change-queue", name="jury_clarification_change_queue")
-     * @param Request $request
-     * @param int     $clarId
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function changeQueueAction(Request $request, int $clarId)
+    public function changeQueueAction(Request $request, int $clarId): Response
     {
         /** @var Clarification $clarification */
         $clarification = $this->em->getReference(Clarification::class, $clarId);
@@ -418,13 +376,13 @@ class ClarificationController extends AbstractController
         }
 
         $queue = $request->request->get('queue');
-        if ( $queue === "" ) {
+        if ($queue === "") {
             $queue = null;
         }
         $clarification->setQueue($queue);
         $this->em->flush();
 
-        if($request->isXmlHttpRequest()) {
+        if ($request->isXmlHttpRequest()) {
             return $this->json(true);
         }
         return $this->redirectToRoute('jury_clarification', ['id' => $clarId]);
@@ -432,14 +390,12 @@ class ClarificationController extends AbstractController
 
     /**
      * @Route("/send", methods={"POST"}, name="jury_clarification_send")
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse|\Symfony\Component\HttpFoundation\Response
      */
-    public function sendAction(Request $request)
+    public function sendAction(Request $request): Response
     {
         $clarification = new Clarification();
 
-        if($respid = $request->request->get('id')) {
+        if ($respid = $request->request->get('id')) {
             $respclar = $this->em->getRepository(Clarification::class)->find($respid);
             $clarification->setInReplyTo($respclar);
         }
@@ -452,13 +408,12 @@ class ClarificationController extends AbstractController
             $this->addFlash('danger', $message);
             return $this->redirectToRoute('jury_clarification_send');
         } else {
-            $clarification->setRecipientId($sendto);
             $team = $this->em->getReference(Team::class, $sendto);
             $clarification->setRecipient($team);
         }
 
         $problem = $request->request->get('problem');
-        list($cid, $probid) = explode('-', $problem);
+        [$cid, $probid] = explode('-', $problem);
 
         $contest = $this->em->getReference(Contest::class, $cid);
         $clarification->setContest($contest);
@@ -476,7 +431,7 @@ class ClarificationController extends AbstractController
             }
         }
 
-        if($respid) {
+        if ($respid) {
             $queue = $respclar->getQueue();
         } else {
             $queue = $this->config->get('clar_default_problem_queue');
@@ -501,16 +456,16 @@ class ClarificationController extends AbstractController
 
         $clarId = $clarification->getClarId();
         $this->dj->auditlog('clarification', $clarId, 'added', null, null, $cid);
-        $this->eventLogService->log('clarification', $clarId, 'create', $cid);
-        // Reload clarification to make sure we have a fresh one after calling the event log service
+        $this->eventLogService->log('clarification', $clarId, 'create', (int)$cid);
+        // Reload clarification to make sure we have a fresh one after calling the event log service.
         $clarification = $this->em->getRepository(Clarification::class)->find($clarId);
 
-        if($sendto) {
+        if ($sendto) {
             $team = $this->em->getRepository(Team::class)->find($sendto);
             $team->addUnreadClarification($clarification);
         } else {
             $teams = $this->em->getRepository(Team::class)->findAll();
-            foreach($teams as $team) {
+            foreach ($teams as $team) {
                 $team->addUnreadClarification($clarification);
             }
         }

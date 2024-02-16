@@ -6,7 +6,7 @@
 # This script does not actually "compile" the source, but writes a
 # shell script that will function as the executable: when called, it
 # will execute the source with the correct interpreter syntax, thus
-# allowing this interpreted source to be used transparantly as if it
+# allowing this interpreted source to be used transparently as if it
 # was compiled to a standalone binary.
 #
 # This scripts requires nodejs to be present in the chroot.
@@ -17,7 +17,7 @@ MAINSOURCE="${ENTRY_POINT:-$1}"
 
 # Report the entry point, so it can be saved, e.g. for later replay:
 if [ -z "$ENTRY_POINT" ]; then
-	echo "Info: detected entry_point: $MAINCLASS"
+	echo "Info: detected entry_point: $MAINSOURCE"
 fi
 
 # Write executing script:

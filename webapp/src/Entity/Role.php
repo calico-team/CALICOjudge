@@ -6,146 +6,93 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * Possible user roles
+ * Possible user roles.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="role",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Possible user roles"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Possible user roles"},
  *     uniqueConstraints={@ORM\UniqueConstraint(name="role", columns={"role"})})
  */
 class Role
 {
     /**
-     * @var int
      * @ORM\Id
      * @ORM\GeneratedValue(strategy="AUTO")
      * @ORM\Column(type="integer", name="roleid", length=4,
      *     options={"comment"="Role ID","unsigned"=true}, nullable=false)
      */
-    private $roleid;
+    private int $roleid;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="role", length=32, options={"comment"="Role name"}, nullable=false)
      */
-    private $dj_role;
+    private string $dj_role;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="description", length=255, options={"comment"="Description for the web interface"}, nullable=false)
      */
-    private $description;
+    private string $description;
 
     /**
      * @ORM\ManyToMany(targetEntity="User", mappedBy="user_roles")
      */
-    private $users;
+    private Collection $users;
 
-    public function getRole()
+    public function getRole(): string
     {
         return "ROLE_" . strtoupper($this->dj_role);
     }
 
-    /**
-     * Get roleid
-     *
-     * @return integer
-     */
-    public function getRoleid()
+    public function getRoleid(): int
     {
         return $this->roleid;
     }
 
-    /**
-     * Set description
-     *
-     * @param string $description
-     *
-     * @return Role
-     */
-    public function setDescription($description)
+    public function setDescription(string $description): Role
     {
         $this->description = $description;
-
         return $this;
     }
 
-    /**
-     * Get description
-     *
-     * @return string
-     */
-    public function getDescription()
+    public function getDescription(): string
     {
         return $this->description;
     }
 
-    /**
-    * Set djRole
-    *
-    * @param string $djRole
-    *
-    * @return Role
-    */
-    public function setDjRole($djRole)
+    public function setDjRole(string $djRole): Role
     {
         $this->dj_role = $djRole;
-
         return $this;
     }
 
-    /**
-    * Get djRole
-    *
-    * @return string
-    */
-    public function getDjRole()
+    public function getDjRole(): string
     {
         return $this->dj_role;
     }
-    /**
-     * Constructor
-     */
+
     public function __construct()
     {
-        $this->users = new \Doctrine\Common\Collections\ArrayCollection();
+        $this->users = new ArrayCollection();
     }
 
-    /**
-     * Add user
-     *
-     * @param \App\Entity\User $user
-     *
-     * @return Role
-     */
-    public function addUser(\App\Entity\User $user)
+    public function addUser(User $user): Role
     {
         $this->users[] = $user;
-
         return $this;
     }
 
-    /**
-     * Remove user
-     *
-     * @param \App\Entity\User $user
-     */
-    public function removeUser(\App\Entity\User $user)
+    public function removeUser(User $user): void
     {
         $this->users->removeElement($user);
     }
 
-    /**
-     * Get users
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getUsers()
+    public function getUsers(): Collection
     {
         return $this->users;
     }
 
-    public function __toString()
+    public function __toString(): string
     {
         return $this->getRole() . ": " . $this->getDescription();
     }

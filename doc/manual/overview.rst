@@ -45,7 +45,7 @@ chapters for detailed software requirements.
 
 * At least one machine to act as the *DOMjudge server* (or *domserver* for
   brevity). The machine needs to be running Linux (or possibly a Unix
-  variant) and a webserver with PHP 7.2.5 or newer. A MySQL or MariaDB
+  variant) and a webserver with PHP 7.4.0 or newer. A MySQL or MariaDB
   database is also needed.
 
 * A number of machines to act as *judgehosts* (at least one). They need to run
@@ -87,46 +87,14 @@ DOMjudge supports running :ref:`multiple judgedaemons <multiple-judgedaemons>`
 in parallel on a single judgehost machine. This might be useful on multi-core
 machines.
 
+.. warning::
+
+  The judgehost requires Linux cgroup support for memory and swap accounting.
+  Platforms that do not provide this support (some virtualization environments,
+  for example WSL 1) will not work with the judgehost. See our `wiki <https://github.com/DOMjudge/domjudge/wiki/Running-DOMjudge-in-WSL>`_ for information about DOMjudge and WSL.
+
 Copyright and licencing
 -----------------------
-
-DOMjudge is developed by Jaap Eldering, Nicky Gerritsen, Keith Johnson,
-Thijs Kinkhorst and Tobias Werth; Peter van de Werken has retired as developer.
-Many other people have contributed:
-Michael Baer,
-Jeroen Bransen,
-Matt Claycomb,
-Stijn van Drongelen,
-Rob Franken,
-Marc Furon,
-Ragnar Groot Koerkamp,
-Matt Hermes,
-Michał Kaczanowicz,
-Jacob Kleerekoper,
-Jason Klein,
-Andreas Kohn,
-Ruud Koot,
-Ilya Kornakov,
-Jan Kuipers,
-Robin Lee,
-Tom Levy,
-Richard Lobb,
-Alex Muntada,
-Dominik Paulus,
-Bert Peters,
-Mart Pluijmaekers,
-Ludo Pulles,
-Tobias Polzer,
-Jeroen Schot,
-Matt Steele,
-Shuhei Takahashi,
-Michael Vasseur,
-Sergei Vorobev,
-Hoai-Thu Vuong,
-Jeroen van Wolffelaar,
-and Github users mpsijm, sylxjtu.
-Some code has been ported from the ETH Zurich fork by Christoph
-Krautz, Thomas Rast et al.
 
 DOMjudge is Copyright (c) 2004 - |today| by the DOMjudge developers and contributors.
 
@@ -134,6 +102,9 @@ DOMjudge, including its documentation, is free software; you can redistribute
 it and/or modify it under the terms of the GNU General Public License as
 published by the Free Software Foundation; either version 2, or (at your
 option) any later version. See the file COPYING for details.
+
+Please see the file CONTRIBUTORS.md in the code repository for a list
+of people who have contributed to DOMjudge.
 
 This software is partly based on code by other people. Please refer to
 individual files for acknowledgements.
@@ -163,13 +134,17 @@ Contact
 The DOMjudge homepage can be found at: https://www.domjudge.org/
 
 We have a low volume `mailing list for announcements
-<https://www.domjudge.org/mailman/listinfo/domjudge-announce>`_
+<https://www.domjudge.org/mailman/postorius/lists/domjudge-announce.domjudge.org/>`_
 of new releases.
 The authors can be reached through the development mailing list.
 You need to be subscribed before you can post. See the
-`development list information page 
-<https://www.domjudge.org/mailman/listinfo/domjudge-devel>`_
+`development list information page
+<https://www.domjudge.org/mailman/postorius/lists/domjudge-devel.domjudge.org/>`_
 for subscription and more details.
+
+There is a wiki which collects other pieces of information about
+specific configurations or integrations:
+https://github.com/DOMjudge/domjudge/wiki
 
 DOMjudge has a `Slack workspace <https://www.domjudge.org/chat>`_
 where a number of developers and users of

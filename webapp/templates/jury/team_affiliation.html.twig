@@ -10,7 +10,7 @@
 
 {% block content %}
 
-    <h1>Affiliation: {{ teamAffiliation.name }}</h1>
+    <h1>Affiliation {{ teamAffiliation.name }}</h1>
 
     <div class="row">
         <div class="col-lg-4">
@@ -26,12 +26,18 @@
                     </tr>
                 {% endif %}
                 <tr>
-                    <th>Shortname</th>
-                    <td>{{ teamAffiliation.shortname }}</td>
+                    <th>ICPC ID</th>
+                    <td>
+                        {% if teamAffiliation.icpcid %}
+                            {{ teamAffiliation.icpcid }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
                 </tr>
                 <tr>
-                    <th>Name</th>
-                    <td>{{ teamAffiliation.name }}</td>
+                    <th>Shortname</th>
+                    <td>{{ teamAffiliation.shortname }}</td>
                 </tr>
                 <tr>
                     <th>Logo</th>
@@ -40,8 +46,8 @@
                         {% if showExternalId(teamAffiliation) %}
                             {% set affiliationId = teamAffiliation.externalid %}
                         {% endif %}
-                        {% set affiliationLogo = 'images/affiliations/' ~ affiliationId ~ '.png' %}
-                        {% if affiliationLogo | assetExists %}
+                        {% set affiliationLogo = affiliationId | assetPath('affiliation') %}
+                        {% if affiliationLogo %}
                             <img src="{{ asset(affiliationLogo) }}" alt="{{ teamAffiliation.shortname }}"
                                  title="{{ teamAffiliation.shortname }}" class="affiliation-logo"/>
                         {% else %}
@@ -53,21 +59,14 @@
                     <tr>
                         <th>Country</th>
                         <td>
-                            {% if teamAffiliation.country is not empty %}
-                                {% set countryFlag = 'images/countries/' ~ teamAffiliation.country ~ '.png' %}
-                                {% if countryFlag | assetExists %}
-                                    <img src="{{ asset(countryFlag) }}" alt="{{ alpha3_countries[teamAffiliation.country] }}"
-                                         title="{{ alpha3_countries[teamAffiliation.country] }}" class="countryflag"/>
-                                {% endif %}
-                            {% endif %}
-                            {{ alpha3_countries[teamAffiliation.country] }}
+                            {{ teamAffiliation.country | countryFlag(true) }}
                         </td>
                     </tr>
                 {% endif %}
-                {% if teamAffiliation.comments is not empty %}
+                {% if teamAffiliation.internalcomments is not empty %}
                     <tr>
                         <th>Comments</th>
-                        <td>{{ teamAffiliation.comments }}</td>
+                        <td>{{ teamAffiliation.internalcomments }}</td>
                     </tr>
                 {% endif %}
             </table>
@@ -81,7 +80,7 @@
         </p>
     {% endif %}
 
-    <h2>Teams from {{ teamAffiliation.name }}</h2>
+    <h3>Teams</h3>
     {% if teamAffiliation.teams is empty %}
         <p class="nodata">no teams</p>
     {% else %}
@@ -90,15 +89,15 @@
                 <table class="data-table table table-sm table-striped table-hover">
                     <thead>
                     <tr>
-                        <th>ID</th>
+                        <th style="text-align: right;">ID</th>
                         <th>Teamname</th>
                     </tr>
                     </thead>
                     <tbody>
                     {% for team in teamAffiliation.teams %}
                         <tr>
-                            <td>
-                                <a href="{{ path('jury_team', {'teamId': team.teamid}) }}">{{ team.teamid }}</a>
+                            <td style="text-align: right;">
+                                <a href="{{ path('jury_team', {'teamId': team.teamid}) }}">{{ team | entityIdBadge('t') }}</a>
                             </td>
                             <td>
                                 <a href="{{ path('jury_team', {'teamId': team.teamid}) }}">{{ team.effectiveName }}</a>

@@ -5,255 +5,153 @@ namespace App\Entity;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * Log of all actions performed
+ * Log of all actions performed.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="auditlog",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Log of all actions performed"})
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Log of all actions performed"})
  */
 class AuditLog
 {
     /**
-     * @var int
-     *
      * @ORM\Id
      * @ORM\GeneratedValue(strategy="AUTO")
      * @ORM\Column(type="integer", name="logid", length=4,
      *     options={"comment"="Audit log ID","unsigned"=true}, nullable=false)
      */
-    private $logid;
+    private ?int $logid;
 
     /**
-     * @var double
-     * @ORM\Column(type="decimal", precision=32, scale=9, name="logtime", options={"comment"="Timestamp of the logentry", "unsigned"=true}, nullable=false)
+     * @var double|string
+     * @ORM\Column(type="decimal", precision=32, scale=9, name="logtime",
+     *     options={"comment"="Timestamp of the logentry", "unsigned"=true}, nullable=false)
      */
     private $logtime;
 
     /**
-     * @var int
      * @ORM\Column(type="integer", name="cid", length=4,
      *     options={"comment"="Contest ID associated to this entry",
-     *              "unsigned"=true,"default"="NULL"},
+     *              "unsigned"=true},
      *     nullable=true)
      */
-    private $cid;
+    private ?int $cid;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="user", length=255,
-     *     options={"comment"="User who performed this action","default"="NULL"},
+     *     options={"comment"="User who performed this action"},
      *     nullable=true)
      */
-    private $user;
+    private ?string $user;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="datatype", length=32,
-     *     options={"comment"="Reference to DB table associated to this entry",
-     *              "default"="NULL"},
-     *     nullable=true)
+     *     options={"comment"="Reference to DB table associated to this entry"},
+     *     nullable=false)
      */
-    private $datatype;
+    private string $datatype;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="dataid", length=64,
-     *     options={"comment"="Identifier in reference table","default"="NULL"},
+     *     options={"comment"="Identifier in reference table"},
      *     nullable=true)
      */
-    private $dataid;
+    private ?string $dataid;
 
     /**
-     * @var string
-     * @ORM\Column(type="string", name="action", length=64,
-     *     options={"comment"="Description of action performed","default"="NULL"},
-     *     nullable=true)
+     * @ORM\Column(type="string", name="action", length=128,
+     *     options={"comment"="Description of action performed"},
+     *     nullable=false)
      */
-    private $action;
+    private string $action;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="extrainfo", length=255,
-     *     options={"comment"="Optional additional description of the entry",
-     *              "default"="NULL"},
+     *     options={"comment"="Optional additional description of the entry"},
      *     nullable=true)
      */
-    private $extrainfo;
+    private ?string $extrainfo;
 
-    /**
-     * Get logid
-     *
-     * @return integer
-     */
-    public function getLogid()
+    public function getLogid(): ?int
     {
         return $this->logid;
     }
 
-    /**
-     * Set logtime
-     *
-     * @param string $logtime
-     *
-     * @return AuditLog
-     */
-    public function setLogtime($logtime)
+    /** @param string|float $logtime */
+    public function setLogtime($logtime): AuditLog
     {
         $this->logtime = $logtime;
-
         return $this;
     }
 
-    /**
-     * Get logtime
-     *
-     * @return string
-     */
+    /** @return string|float */
     public function getLogtime()
     {
         return $this->logtime;
     }
 
-    /**
-     * Set cid
-     *
-     * @param integer $cid
-     *
-     * @return AuditLog
-     */
-    public function setCid($cid)
+    public function setCid(?int $cid): AuditLog
     {
         $this->cid = $cid;
-
         return $this;
     }
 
-    /**
-     * Get cid
-     *
-     * @return integer
-     */
-    public function getCid()
+    public function getCid(): ?int
     {
         return $this->cid;
     }
 
-    /**
-     * Set user
-     *
-     * @param string $user
-     *
-     * @return AuditLog
-     */
-    public function setUser($user)
+    public function setUser(?string $user): AuditLog
     {
         $this->user = $user;
-
         return $this;
     }
 
-    /**
-     * Get user
-     *
-     * @return string
-     */
-    public function getUser()
+    public function getUser(): ?string
     {
         return $this->user;
     }
 
-    /**
-     * Set datatype
-     *
-     * @param string $datatype
-     *
-     * @return AuditLog
-     */
-    public function setDatatype($datatype)
+    public function setDatatype(string $datatype): AuditLog
     {
         $this->datatype = $datatype;
-
         return $this;
     }
 
-    /**
-     * Get datatype
-     *
-     * @return string
-     */
-    public function getDatatype()
+    public function getDatatype(): string
     {
         return $this->datatype;
     }
 
-    /**
-     * Set dataid
-     *
-     * @param string $dataid
-     *
-     * @return AuditLog
-     */
-    public function setDataid($dataid)
+    public function setDataid(?string $dataid): AuditLog
     {
         $this->dataid = $dataid;
-
         return $this;
     }
 
-    /**
-     * Get dataid
-     *
-     * @return string
-     */
-    public function getDataid()
+    public function getDataid(): ?string
     {
         return $this->dataid;
     }
 
-    /**
-     * Set action
-     *
-     * @param string $action
-     *
-     * @return AuditLog
-     */
-    public function setAction($action)
+    public function setAction(string $action): AuditLog
     {
         $this->action = $action;
-
         return $this;
     }
 
-    /**
-     * Get action
-     *
-     * @return string
-     */
-    public function getAction()
+    public function getAction(): string
     {
         return $this->action;
     }
 
-    /**
-     * Set extrainfo
-     *
-     * @param string $extrainfo
-     *
-     * @return AuditLog
-     */
-    public function setExtrainfo($extrainfo)
+    public function setExtrainfo(?string $extrainfo): AuditLog
     {
         $this->extrainfo = $extrainfo;
-
         return $this;
     }
 
-    /**
-     * Get extrainfo
-     *
-     * @return string
-     */
-    public function getExtrainfo()
+    public function getExtrainfo(): ?string
     {
         return $this->extrainfo;
     }

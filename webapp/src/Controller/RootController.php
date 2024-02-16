@@ -16,15 +16,8 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  */
 class RootController extends BaseController
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected DOMJudgeService $dj;
 
-    /**
-     * RootController constructor.
-     * @param DOMJudgeService        $dj
-     */
     public function __construct(DOMJudgeService $dj)
     {
         $this->dj = $dj;
@@ -32,10 +25,9 @@ class RootController extends BaseController
 
     /**
      * @Route("", name="root")
-     * @param AuthorizationCheckerInterface $authorizationChecker
-     * @return RedirectResponse
      */
-    public function redirectAction(AuthorizationCheckerInterface $authorizationChecker) {
+    public function redirectAction(AuthorizationCheckerInterface $authorizationChecker): RedirectResponse
+    {
         if ($authorizationChecker->isGranted('IS_AUTHENTICATED_FULLY')) {
             if ($this->dj->checkrole('jury')) {
                 return $this->redirectToRoute('jury_index');
@@ -45,6 +37,9 @@ class RootController extends BaseController
             }
             if ($this->dj->checkrole('balloon')) {
                 return $this->redirectToRoute('jury_balloons');
+            }
+            if ($this->dj->checkrole('clarification_rw')) {
+                return $this->redirectToRoute('jury_clarifications');
             }
         }
         return $this->redirectToRoute('public_index');

@@ -8,29 +8,31 @@ use App\Service\ConfigurationService;
 use App\Service\DOMJudgeService;
 use App\Service\EventLogService;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\NonUniqueResultException;
 use Doctrine\ORM\QueryBuilder;
 use FOS\RestBundle\Controller\Annotations as Rest;
 use Nelmio\ApiDocBundle\Annotation\Model;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\IsGranted;
+use OpenApi\Annotations as OA;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
-use Swagger\Annotations as SWG;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
- * @Rest\Route("/api/v4/contests/{cid}/judgements", defaults={ "_format" = "json" })
- * @Rest\Prefix("/api/contests/{cid}/judgements")
- * @Rest\NamePrefix("judgement_")
- * @SWG\Tag(name="Judgements")
- * @SWG\Parameter(ref="#/parameters/cid")
- * @SWG\Response(response="404", ref="#/definitions/NotFound")
- * @SWG\Response(response="401", ref="#/definitions/Unauthorized")
+ * @Rest\Route("/")
+ * @OA\Tag(name="Judgements")
+ * @OA\Parameter(ref="#/components/parameters/cid")
+ * @OA\Parameter(ref="#/components/parameters/strict")
+ * @OA\Response(response="404", ref="#/components/responses/NotFound")
+ * @OA\Response(response="401", ref="#/components/responses/Unauthenticated")
+ * @OA\Response(response="400", ref="#/components/responses/InvalidResponse")
+ * @OA\Response(response="403", ref="#/components/responses/Unauthorized")
  */
 class JudgementController extends AbstractRestController implements QueryObjectTransformer
 {
     /**
      * @var string[]
      */
-    protected $verdicts;
+    protected array $verdicts;
 
     public function __construct(
         EntityManagerInterface $entityManager,
@@ -42,78 +44,70 @@ class JudgementController extends AbstractRestController implements QueryObjectT
 
         $verdictsConfig = $this->dj->getDomjudgeEtcDir() . '/verdicts.php';
         $this->verdicts = include $verdictsConfig;
+        $this->verdicts['aborted'] = 'JE'; /* happens for aborted judgings */
     }
 
     /**
-     * Get all the judgements for this contest
-     * @param Request $request
-     * @return \Symfony\Component\HttpFoundation\Response
+     * Get all the judgements for this contest.
      * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_TEAM') or is_granted('ROLE_JUDGEHOST') or is_granted('ROLE_API_READER')")
-     * @Rest\Get("")
-     * @SWG\Response(
+     * @Rest\Get("contests/{cid}/judgements")
+     * @Rest\Get("judgements")
+     * @OA\Response(
      *     response="200",
      *     description="Returns all the judgements for this contest",
-     *     @SWG\Schema(
+     *     @OA\JsonContent(
      *         type="array",
-     *         @SWG\Items(
+     *         @OA\Items(
      *             allOf={
-     *                 @SWG\Schema(ref=@Model(type=Judging::class)),
-     *                 @SWG\Schema(ref="#/definitions/JudgementExtraFields")
+     *                 @OA\Schema(ref=@Model(type=Judging::class)),
+     *                 @OA\Schema(ref="#/components/schemas/JudgementExtraFields")
      *             }
      *         )
      *     )
      * )
-     * @SWG\Parameter(ref="#/parameters/idlist")
-     * @SWG\Parameter(ref="#/parameters/strict")
-     * @SWG\Parameter(
+     * @OA\Parameter(ref="#/components/parameters/idlist")
+     * @OA\Parameter(
      *     name="result",
      *     in="query",
-     *     type="string",
-     *     description="Only show judgements with the given result"
+     *     description="Only show judgements with the given result",
+     *     @OA\Schema(type="string")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="submission_id",
      *     in="query",
-     *     type="string",
-     *     description="Only show judgements for the given submission"
+     *     description="Only show judgements for the given submission",
+     *     @OA\Schema(type="string")
      * )
-     * @throws \Doctrine\ORM\NonUniqueResultException
+     * @throws NonUniqueResultException
      */
-    public function listAction(Request $request)
+    public function listAction(Request $request): Response
     {
         return parent::performListAction($request);
     }
 
     /**
-     * Get the given judgement for this contest
-     * @param Request $request
-     * @param string $id
-     * @return \Symfony\Component\HttpFoundation\Response
-     * @throws \Doctrine\ORM\NonUniqueResultException
+     * Get the given judgement for this contest.
+     * @throws NonUniqueResultException
      * @Security("is_granted('ROLE_JURY') or is_granted('ROLE_TEAM') or is_granted('ROLE_JUDGEHOST') or is_granted('ROLE_API_READER')")
-     * @Rest\Get("/{id}")
-     * @SWG\Response(
+     * @Rest\Get("contests/{cid}/judgements/{id<\d+>}")
+     * @Rest\Get("judgements/{id<\d+>}")
+     * @OA\Response(
      *     response="200",
      *     description="Returns the given judgement for this contest",
-     *     @SWG\Schema(
+     *     @OA\JsonContent(
      *         allOf={
-     *             @SWG\Schema(ref=@Model(type=Judging::class)),
-     *             @SWG\Schema(ref="#/definitions/JudgementExtraFields")
+     *             @OA\Schema(ref=@Model(type=Judging::class)),
+     *             @OA\Schema(ref="#/components/schemas/JudgementExtraFields")
      *         }
      *     )
      * )
-     * @SWG\Parameter(ref="#/parameters/id")
-     * @SWG\Parameter(ref="#/parameters/strict")
+     * @OA\Parameter(ref="#/components/parameters/id")
      */
-    public function singleAction(Request $request, string $id)
+    public function singleAction(Request $request, string $id): Response
     {
         return parent::performSingleAction($request, $id);
     }
 
-    /**
-     * @inheritdoc
-     * @throws \Exception
-     */
     protected function getQueryBuilder(Request $request): QueryBuilder
     {
         $queryBuilder = $this->em->createQueryBuilder()
@@ -123,38 +117,42 @@ class JudgementController extends AbstractRestController implements QueryObjectT
             ->leftJoin('j.submission', 's')
             ->leftJoin('j.rejudging', 'r')
             ->leftJoin('j.runs', 'jr')
-            ->andWhere('j.cid = :cid')
-            ->setParameter(':cid', $this->getContestId($request))
             ->groupBy('j.judgingid')
             ->orderBy('j.judgingid');
+
+        if ($request->attributes->has('cid')) {
+            $queryBuilder
+                ->andWhere('j.contest = :cid')
+                ->setParameter('cid', $this->getContestId($request));
+        }
 
         $roleAllowsVisibility = $this->dj->checkrole('api_reader')
             || $this->dj->checkrole('judgehost');
         if ($request->query->has('result')) {
             $queryBuilder
                 ->andWhere('j.result = :result')
-                ->setParameter(':result', $request->query->get('result'));
+                ->setParameter('result', $request->query->get('result'));
         } elseif (!$roleAllowsVisibility) {
             $queryBuilder->andWhere('j.result IS NOT NULL');
         }
 
         if (!$roleAllowsVisibility) {
             $queryBuilder
-                ->andWhere('s.teamid = :team')
-                ->setParameter(':team', $this->dj->getUser()->getTeamid());
+                ->andWhere('s.team = :team')
+                ->setParameter('team', $this->dj->getUser()->getTeam());
         }
 
         if ($request->query->has('submission_id')) {
             $queryBuilder
-                ->andWhere('j.submitid = :submission')
-                ->setParameter(':submission', $request->query->get('submission_id'));
+                ->andWhere('j.submission = :submission')
+                ->setParameter('submission', $request->query->get('submission_id'));
         }
 
         $specificJudgingRequested = $request->attributes->has('id')
             || $request->query->has('ids');
-        // If we don't have correct permissions or didn't request a specific
-        // judging (necessary for the event log), then exclude some judgings:
-        if (!$roleAllowsVisibility && !$specificJudgingRequested) {
+        // Only include invalid or too late submissions if the role allows it
+        // and we request these specific submissions.
+        if (!($roleAllowsVisibility && $specificJudgingRequested)) {
             $queryBuilder
                 ->andWhere('s.submittime < c.endtime')
                 ->andWhere('j.valid = 1');
@@ -166,18 +164,12 @@ class JudgementController extends AbstractRestController implements QueryObjectT
         return $queryBuilder;
     }
 
-    /**
-     * @inheritdoc
-     */
     protected function getIdField(): string
     {
         return 'j.judgingid';
     }
 
-    /**
-     * @inheritdoc
-     */
-    public function transformObject($object)
+    public function transformObject($object): JudgingWrapper
     {
         /** @var Judging $judging */
         $judging         = $object[0];

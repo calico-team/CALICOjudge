@@ -32,9 +32,7 @@ You then have the option to automatically create a corresponding user
 account that is associated with the team.
 
 It is also possible to use the *Import / Export* page to import
-`ICPC-compatible tsv files
-<https://clics.ecs.baylor.edu/index.php?title=Contest_Control_System_Requirements#teams.tsv>`_
-with teams.
+`ICPC-compatible teams.tsv files`_ with teams.
 
 A jury or administrative user can also be associated with a team. This
 will enable that user to submit solutions to the system, or resubmit
@@ -121,8 +119,8 @@ statements that require non-standard evaluation.
 Checking your configuration
 ---------------------------
 From the front page the *Config checker* is available. This tool will
-do a basic sanity check of your DOMjudge setup and gives helpful hints
-to improve it. Be sure to run it when you've set up your contest.
+do a basic check of your DOMjudge setup and gives helpful hints to
+improve it. Be sure to run it when you've set up your contest.
 
 
 Testing jury solutions
@@ -134,7 +132,7 @@ and maybe use their runtimes to set timelimits for the problems.
 The simplest way to do this is to include the jury solutions in a
 problem zip file and upload this. You can also upload a zip file
 containing just solutions to an existing problem. The zip
-archive has to adhere to the `ICPC problem format`_.
+archive has to adhere to the :doc:`problem format <problem-format>`.
 For this to work, the jury/admin user who uploads the problem has to
 have an associated team to which the solutions will be assigned. The
 solutions will automatically be judged if the contest is active (but
@@ -142,4 +140,4 @@ it need not have started yet). You can verify whether the submissions
 gave the expected answer in the Judging Verifier, available from
 the jury index page.
 
-.. _ICPC problem format: https://clics.ecs.baylor.edu/index.php?title=Problem_format
+.. _ICPC-compatible teams.tsv files: https://ccs-specs.icpc.io/2021-11/ccs_system_requirements#teamstsv

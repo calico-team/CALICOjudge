@@ -2,26 +2,27 @@
 namespace App\Entity;
 
 use App\Service\EventLogService;
+use App\Utils\Utils;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
-use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping as ORM;
-use Exception;
 use JMS\Serializer\Annotation as Serializer;
 use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 /**
- * Many-to-Many mapping of contests and problems
+ * Many-to-Many mapping of contests and problems.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="contestproblem",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Many-to-Many mapping of contests and problems"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Many-to-Many mapping of contests and problems"},
  *     indexes={
  *         @ORM\Index(name="cid", columns={"cid"}),
  *         @ORM\Index(name="probid", columns={"probid"})
  *     },
  *     uniqueConstraints={
- *         @ORM\UniqueConstraint(name="shortname", columns={"cid", "shortname"}, options={"lengths"={NULL,"190"}})
+ *         @ORM\UniqueConstraint(name="shortname", columns={"cid", "shortname"}, options={"lengths"={NULL,190}})
  *     })
  * @Serializer\VirtualProperty(
  *     "id",
@@ -31,23 +32,20 @@ use Symfony\Component\Validator\Constraints as Assert;
  * @Serializer\VirtualProperty(
  *     "short_name",
  *     exp="object.getShortname()",
- *     options={@Serializer\Groups("Nonstrict"), @Serializer\Type("string")}
+ *     options={@Serializer\Groups({"Nonstrict"}), @Serializer\Type("string")}
  * )
  */
 class ContestProblem
 {
     /**
-     * @var string
      * @ORM\Column(type="string", name="shortname", length=255,
      *     options={"comment"="Unique problem ID within contest, used to sort problems in the scoreboard and typically a single letter"},
      *     nullable=false)
      * @Serializer\SerializedName("label")
      */
-    private $shortname;
+    private string $shortname;
 
     /**
-     * @var int
-     *
      * @ORM\Column(type="integer", name="points", length=4,
      *     options={"comment"="Number of points earned by solving this problem",
      *              "unsigned"=true,"default"="1"},
@@ -55,49 +53,45 @@ class ContestProblem
      * @Serializer\Exclude()
      * @Assert\GreaterThanOrEqual(0)
      */
-    private $points = 1;
+    private int $points = 1;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="allow_submit",
      *     options={"comment"="Are submissions accepted for this problem?",
      *              "default"="1"},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $allowSubmit = true;
+    private bool $allowSubmit = true;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="allow_judge",
      *     options={"comment"="Are submissions for this problem judged?",
      *              "default"="1"},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $allowJudge = true;
+    private bool $allowJudge = true;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="color", length=32,
-     *     options={"comment"="Balloon colour to display on the scoreboard",
-     *              "default"="NULL"},
+     *     options={"comment"="Balloon colour to display on the scoreboard"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $color;
+    private ?string $color = null;
 
     /**
-     * @var boolean|null
-     * @ORM\Column(type="boolean", name="lazy_eval_results",
+     * @ORM\Column(type="integer", name="lazy_eval_results",
      *     options={"comment"="Whether to do lazy evaluation for this problem; if set this overrides the global configuration setting",
-     *              "unsigned"="true", "default"="NULL"},
+     *              "unsigned"="true"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $lazyEvalResults;
+    private ?int $lazyEvalResults = null;
 
     /**
+     * @var Contest|int
      * @ORM\Id()
      * @ORM\ManyToOne(targetEntity="Contest", inversedBy="problems")
      * @ORM\JoinColumn(name="cid", referencedColumnName="cid", onDelete="CASCADE")
@@ -106,6 +100,7 @@ class ContestProblem
     private $contest;
 
     /**
+     * @var Problem|int
      * @ORM\Id()
      * @ORM\ManyToOne(targetEntity="Problem", inversedBy="contest_problems", fetch="EAGER")
      * @ORM\JoinColumn(name="probid", referencedColumnName="probid", onDelete="CASCADE")
@@ -114,282 +109,155 @@ class ContestProblem
     private $problem;
 
     /**
-     * @var ArrayCollection
      * @ORM\OneToMany(targetEntity="App\Entity\Submission", mappedBy="contest_problem")
      * @Serializer\Exclude()
      */
-    private $submissions;
+    private Collection $submissions;
 
     public function __construct()
     {
         $this->submissions = new ArrayCollection();
     }
 
-    /**
-     * Get cid
-     *
-     * @return integer
-     */
-    public function getCid()
+    public function getCid(): int
     {
         return $this->getContest()->getCid();
     }
 
-    /**
-     * Get probid
-     *
-     * @return integer
-     */
-    public function getProbid()
+    public function getProbid(): int
     {
         return $this->getProblem()->getProbid();
     }
 
-    /**
-     * Set shortname
-     *
-     * @param string $shortname
-     *
-     * @return ContestProblem
-     */
-    public function setShortname($shortname)
+    public function setShortname(string $shortname): ContestProblem
     {
         $this->shortname = $shortname;
-
         return $this;
     }
 
-    /**
-     * Get shortname
-     *
-     * @return string
-     */
-    public function getShortname()
+    public function getShortname(): string
     {
         return $this->shortname;
     }
 
-    /**
-     * Set points
-     *
-     * @param integer $points
-     *
-     * @return ContestProblem
-     */
-    public function setPoints($points)
+    public function getShortDescription(): string
+    {
+        return $this->getShortname();
+    }
+
+    public function setPoints(int $points): ContestProblem
     {
         $this->points = $points;
-
         return $this;
     }
 
-    /**
-     * Get points
-     *
-     * @return integer
-     */
-    public function getPoints()
+    public function getPoints(): int
     {
         return $this->points;
     }
 
-    /**
-     * Set allowSubmit
-     *
-     * @param boolean $allowSubmit
-     *
-     * @return ContestProblem
-     */
-    public function setAllowSubmit($allowSubmit)
+    public function setAllowSubmit(bool $allowSubmit): ContestProblem
     {
         $this->allowSubmit = $allowSubmit;
-
         return $this;
     }
 
-    /**
-     * Get allowSubmit
-     *
-     * @return boolean
-     */
-    public function getAllowSubmit()
+    public function getAllowSubmit(): bool
     {
         return $this->allowSubmit;
     }
 
-    /**
-     * Set allowJudge
-     *
-     * @param boolean $allowJudge
-     *
-     * @return ContestProblem
-     */
-    public function setAllowJudge($allowJudge)
+    public function setAllowJudge(bool $allowJudge): ContestProblem
     {
         $this->allowJudge = $allowJudge;
-
         return $this;
     }
 
-    /**
-     * Get allowJudge
-     *
-     * @return boolean
-     */
-    public function getAllowJudge()
+    public function getAllowJudge(): bool
     {
         return $this->allowJudge;
     }
 
-    /**
-     * Set color
-     *
-     * @param string $color
-     *
-     * @return ContestProblem
-     */
-    public function setColor($color)
+    public function setColor(?string $color): ContestProblem
     {
         $this->color = $color;
-
         return $this;
     }
 
-    /**
-     * Get color
-     *
-     * @return string
-     */
-    public function getColor()
+    public function getColor(): ?string
     {
         return $this->color;
     }
 
-    /**
-     * Set lazyEvalResults
-     *
-     * @param boolean $lazyEvalResults
-     *
-     * @return ContestProblem
-     */
-    public function setLazyEvalResults($lazyEvalResults)
+    public function setLazyEvalResults(?int $lazyEvalResults): ContestProblem
     {
-        $this->lazyEvalResults = $lazyEvalResults;
-
+        $this->lazyEvalResults = $lazyEvalResults === 0 ? null : $lazyEvalResults;
         return $this;
     }
 
-    /**
-     * Get lazyEvalResults
-     *
-     * @return boolean
-     */
-    public function getLazyEvalResults()
+    public function getLazyEvalResults(): ?int
     {
         return $this->lazyEvalResults;
     }
 
-    /**
-     * Set contest
-     *
-     * @param \App\Entity\Contest $contest
-     *
-     * @return ContestProblem
-     */
-    public function setContest(\App\Entity\Contest $contest = null)
+    public function setContest(?Contest $contest = null): ContestProblem
     {
         $this->contest = $contest;
-
         return $this;
     }
 
-    /**
-     * Get contest
-     *
-     * @return \App\Entity\Contest
-     */
-    public function getContest()
+    public function getContest(): Contest
     {
         return $this->contest;
     }
 
-    /**
-     * Set problem
-     *
-     * @param \App\Entity\Problem $problem
-     *
-     * @return ContestProblem
-     */
-    public function setProblem(\App\Entity\Problem $problem = null)
+    public function setProblem(?Problem $problem = null): ContestProblem
     {
         $this->problem = $problem;
-
         return $this;
     }
 
-    /**
-     * Get problem
-     *
-     * @return \App\Entity\Problem
-     */
-    public function getProblem()
+    public function getProblem(): ?Problem
     {
         return $this->problem;
     }
 
-    /**
-     * Add submission
-     *
-     * @param Submission $submission
-     *
-     * @return ContestProblem
-     */
-    public function addSubmission(Submission $submission)
+    public function addSubmission(Submission $submission): ContestProblem
     {
         $this->submissions->add($submission);
-
         return $this;
     }
 
-    /**
-     * Remove submission
-     *
-     * @param Submission $submission
-     */
-    public function removeSubmission(Submission $submission)
+    public function removeSubmission(Submission $submission): void
     {
         $this->submissions->removeElement($submission);
     }
 
-    /**
-     * Get submissions
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getSubmissions()
+    public function getSubmissions(): Collection
     {
         return $this->submissions;
     }
 
-    /**
-     * Get externalid
-     *
-     * @return string
-     */
-    public function getExternalId()
+    public function getExternalId(): string
     {
         return $this->getProblem()->getExternalid();
     }
 
-    /**
-     * Get the API ID for this entity
-     * @param EventLogService        $eventLogService
-     * @param EntityManagerInterface $entityManager
-     * @return mixed
-     * @throws Exception
-     */
-    public function getApiId(EventLogService $eventLogService)
+    public function getApiId(EventLogService $eventLogService): string
     {
         return $this->getProblem()->getApiId($eventLogService);
+    }
+
+    /**
+     * @Assert\Callback()
+     */
+    public function validate(ExecutionContextInterface $context): void
+    {
+        if ($this->getColor() && Utils::convertToHex($this->getColor()) === null) {
+            $context
+                ->buildViolation('This is not a valid color')
+                ->atPath('color')
+                ->addViolation();
+        }
     }
 }

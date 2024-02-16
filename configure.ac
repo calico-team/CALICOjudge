@@ -1,6 +1,6 @@
 # Process this file with autoconf to produce a configure script.
 AC_INIT([DOMjudge],
-        m4_esyscmd([grep 'version' README.md | sed -n '1s/^.*version //p' | tr -d '\n']),
+        m4_esyscmd([grep 'version' README.md | sed -n '1s/^.*version //p' | sed "s/$/$(command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git rev-parse --short HEAD | sed 's|^|\\/|' || echo '' )/" | tr -d '\n']),
         [domjudge-devel@domjudge.org])
 AC_PREREQ([2.64])
 AC_CONFIG_HEADERS([etc/config.h])
@@ -14,15 +14,14 @@ AC_DEFUN([AX_WITH_COMMENT], [
 AC_SUBST(FHS_ENABLED,no)
 AC_ARG_ENABLE(fhs,AS_HELP_STRING([--enable-fhs],
 [use FHS directories (default: no), see below under "Optional
- Packages" for path configuration when FHS is disabled.]),
+ Packages" for path configuration when FHS is disabled.
+ When enabled the default prefix is set to /usr/local.]),
 [if test "x$enableval" != xno ; then AC_SUBST(FHS_ENABLED,yes) fi])
 
+AC_PREFIX_DEFAULT(/opt/domjudge)
+AS_IF([test "x$FHS_ENABLED" = xyes],AC_PREFIX_DEFAULT(/usr/local))
 if test "x$prefix" = xNONE; then
-	if test "x$FHS_ENABLED" = xyes ; then
-		prefix=$ac_default_prefix
-	else
-		prefix="/opt/domjudge"
-	fi
+	prefix=$ac_default_prefix
 fi
 
 if test -z "$PACKAGE_VERSION"; then
@@ -66,12 +65,13 @@ AC_ARG_WITH([domjudge-user], [AS_HELP_STRING([--with-domjudge-user=USER],
 [User that owns password files (default: current user).])], [], [])
 
 if test "x$with_domjudge_user" = x; then
+	user="$(id -un)"
 	# Check and warn if running as root (without explicitly setting it):
-	if test "x$USER" = xroot; then
+	if test "x$user" = xroot; then
 		AC_MSG_ERROR([installing/running as root is STRONGLY DISCOURAGED, use --with-domjudge-user=root to override.])
 	fi
 
-	AC_SUBST(DOMJUDGE_USER,$USER)
+	AC_SUBST(DOMJUDGE_USER,$user)
 	AC_MSG_RESULT([$DOMJUDGE_USER (default: current user)])
 else
 	AC_SUBST(DOMJUDGE_USER,$with_domjudge_user)
@@ -107,7 +107,7 @@ fi
 # {{{ runguard
 AC_MSG_CHECKING([runuser])
 AC_ARG_WITH([runuser], [AS_HELP_STRING([--with-runuser=USER],
-[Unprivileged user under which to run submissions (default: domjudge-run).])], [], [])
+[Prefix for unprivileged user(s) under which to run submissions (default: domjudge-run).])], [], [])
 
 if test "x$with_runuser" = x; then
 	AC_SUBST(RUNUSER,"domjudge-run")
@@ -115,6 +115,13 @@ if test "x$with_runuser" = x; then
 else
 	AC_SUBST(RUNUSER,$with_runuser)
 	AC_MSG_RESULT($RUNUSER)
+fi
+
+if test "x${DOMJUDGE_USER#"$RUNUSER"}" != "x$DOMJUDGE_USER" ; then
+	AC_MSG_ERROR([domjudge_user '$DOMJUDGE_USER' cannot match runuser '$RUNUSER'.])
+fi
+if test "x$RUNUSER" = "xroot" ; then
+	AC_MSG_ERROR([runuser cannot be root.])
 fi
 
 AC_MSG_CHECKING([rungroup])
@@ -191,6 +198,7 @@ AX_PATH(domserver_libvendordir, [$domserver_root/lib/vendor])
 AX_PATH(domserver_logdir,       [$domserver_root/log])
 AX_PATH(domserver_rundir,       [$domserver_root/run])
 AX_PATH(domserver_tmpdir,       [$domserver_root/tmp])
+AX_PATH(domserver_exampleprobdir, [$domserver_root/example_problems])
 AX_WITH_COMMENT(6,[     ])
 AX_PATH(judgehost_bindir,       [$judgehost_root/bin])
 AX_PATH(judgehost_etcdir,       [$judgehost_root/etc])
@@ -203,6 +211,25 @@ AX_PATH(judgehost_judgedir,     [$judgehost_root/judgings])
 AX_PATH(judgehost_chrootdir,    [/chroot/${PACKAGE_TARNAME}])
 AX_PATH(judgehost_cgroupdir,    [/sys/fs/cgroup])
 AX_WITH_COMMENT(7,[      ])
+
+# }}}
+
+# {{{ Directory for systemd unit files
+
+PKG_PROG_PKG_CONFIG
+AC_ARG_WITH([systemdsystemunitdir],
+     [AS_HELP_STRING([--with-systemdsystemunitdir=DIR], [Directory for systemd service files])],,
+     [with_systemdsystemunitdir=auto])
+AS_IF([test "x$with_systemdsystemunitdir" = "xyes" -o "x$with_systemdsystemunitdir" = "xauto"], [
+     def_systemdsystemunitdir=$($PKG_CONFIG --variable=systemdsystemunitdir systemd)
+
+     AS_IF([test "x$def_systemdsystemunitdir" = "x"],
+   [AS_IF([test "x$with_systemdsystemunitdir" = "xyes"],
+    [AC_MSG_ERROR([systemd support requested but pkg-config unable to query systemd package])])
+    with_systemdsystemunitdir=no],
+   [with_systemdsystemunitdir="$def_systemdsystemunitdir"])])
+AS_IF([test "x$with_systemdsystemunitdir" != "xno"],
+      [AC_SUBST([systemd_unitdir], [$with_systemdsystemunitdir])])
 
 # }}}
 
@@ -229,66 +256,6 @@ AC_PROG_INSTALL
 AC_PROG_LN_S
 AC_PROG_MAKE_SET
 AC_PROG_MKDIR_P
-
-# Check for including optional libmagic.
-AC_CHECK_LIB(magic,magic_open,AC_SUBST(LIBMAGIC,[-lmagic]))
-
-# {{{ submitclient
-
-AC_ARG_ENABLE(submitclient,AS_HELP_STRING([--disable-submitclient],
-[enable submit client program (default: yes).
- This requires JSONcpp and cURL libraries and optionally
- libmagic for detecting submission of binary files.]))
-
-if test "x$enable_submitclient" != "xno"; then
-	AC_SUBST(SUBMITCLIENT_ENABLED,[yes])
-
-	# Check for libcURL and JSONcpp when submit is enabled.
-	AX_LIB_CURL([7.9.7],[],[
-		AC_MSG_ERROR([libcURL not found (required for submit client)])
-	])
-	save_CPPFLAGS="$CPPFLAGS"
-	CPPFLAGS="$CPPFLAGS $CURL_CFLAGS"
-	AC_CHECK_HEADERS([curl/curl.h],[],[
-		AC_MSG_ERROR([libcURL headers not found (required for submit client)])
-	])
-	CPPFLAGS="$save_CPPFLAGS"
-	# The 'curl-config --static-libs' option is accepted since 7.17.1
-	AC_SUBST(CURL_STATIC,"")
-	if test "x$enable_static_linking" = "xyes"; then
-		AX_COMPARE_VERSION([$curl_version],[ge],[7.17.1],[
-			AC_SUBST(CURL_STATIC,`curl-config --static-libs`)])
-	fi
-
-	# Check for JSONcpp library to decode language/extensions list from
-	# REST API (this also requires libcURL below).
-
-	# Note that under Debian the header files are installed under
-	# PREFIX/jsoncpp/json/json.h and not PREFIX/json/json.h since that
-	# conflicts with the libjson C library, so we check that first.
-	AC_LANG_PUSH([C++])
-	AC_CHECK_HEADERS([jsoncpp/json/json.h json/json.h],[found_jsoncpp_headers=yes; break;],[])
-	AS_IF([test "x$found_jsoncpp_headers" != "xyes"],
-		AC_MSG_ERROR([JSONcpp headers not found (required for submit client)]),
-		AC_SUBST(LIBJSONCPP,[-ljsoncpp]))
-	AC_LANG_POP([C++])
-
-fi
-# }}}
-
-# Check option to link statically against "special" libraries for
-# submit client.
-AC_ARG_ENABLE(static-linking,AS_HELP_STRING([--enable-static-linking],
-[enable static linking against libcurl, libmagic, libjsoncpp for 'submit'
- (default: no).]))
-
-if test "x$enable_static_linking" = "xyes"; then
-	AC_SUBST(STATIC_LINK_START,[-Wl,-Bstatic])
-	AC_SUBST(STATIC_LINK_END,  [-Wl,-Bdynamic])
-else
-	AC_SUBST(STATIC_LINK_START,[''])
-	AC_SUBST(STATIC_LINK_END,  [''])
-fi
 
 # Check option to build documentation. This option is provided to
 # allow disabling it.
@@ -330,10 +297,20 @@ AC_REPLACE_FUNCS([atexit dup2 getcwd gettimeofday memset mkdir realpath setenv \
                   socket strchr strdup strerror strncasecmp strrchr strstr strtol],
                  [],[AC_MSG_ERROR([required C function is missing.])])
 
+AC_CHECK_PROG(PHP_CHECK,php,yes)
+AS_IF([test x"$PHP_CHECK" != x"yes"],
+      [phpversion=7.4],
+      [phpversion=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')])
+AC_SUBST(PHPVERSION, [$phpversion])
+
 AC_CONFIG_FILES([paths.mk])
 AC_OUTPUT
 
 # summary {{{
+
+# Let's assume that triple expansion is enough...
+AC_DEFUN([AX_VAR_EXPAND], [$(eval echo $(eval echo $(eval echo $1)))])
+
 if test "x$QUIET" = x ; then
 echo ""
 echo "Summary:"
@@ -351,47 +328,44 @@ echo " * webserver group.....: $WEBSERVER_GROUP"
 echo ""
 echo " * website base URL....: $BASEURL"
 echo ""
-if test "x$SUBMITCLIENT_ENABLED" = xyes ; then
-   echo " * submitclient........: enabled, cURL version: $curl_version"
-else
-   echo " * submitclient........: disabled"
-fi
-echo ""
-echo -n " * documentation.......: $domjudge_docdir"
+echo -n " * documentation.......: AX_VAR_EXPAND($domjudge_docdir)"
 if test "x$DOC_BUILD_ENABLED" != xyes ; then
    echo " (disabled)"
 else
    echo ""
 fi
 echo ""
-echo " * domserver...........: $domserver_root"
-echo "    - bin..............: $domserver_bindir"
-echo "    - etc..............: $domserver_etcdir"
-echo "    - lib..............: $domserver_libdir"
-echo "    - libvendor........: $domserver_libvendordir"
-echo "    - log..............: $domserver_logdir"
-echo "    - run..............: $domserver_rundir"
-echo "    - sql..............: $domserver_sqldir"
-echo "    - tmp..............: $domserver_tmpdir"
-echo "    - webapp...........: $domserver_webappdir"
+echo " * domserver...........: AX_VAR_EXPAND($domserver_root)"
+echo "    - bin..............: AX_VAR_EXPAND($domserver_bindir)"
+echo "    - etc..............: AX_VAR_EXPAND($domserver_etcdir)"
+echo "    - lib..............: AX_VAR_EXPAND($domserver_libdir)"
+echo "    - libvendor........: AX_VAR_EXPAND($domserver_libvendordir)"
+echo "    - log..............: AX_VAR_EXPAND($domserver_logdir)"
+echo "    - run..............: AX_VAR_EXPAND($domserver_rundir)"
+echo "    - sql..............: AX_VAR_EXPAND($domserver_sqldir)"
+echo "    - tmp..............: AX_VAR_EXPAND($domserver_tmpdir)"
+echo "    - webapp...........: AX_VAR_EXPAND($domserver_webappdir)"
+echo "    - example_problems.: AX_VAR_EXPAND($domserver_exampleprobdir)"
 echo ""
-echo " * judgehost...........: $judgehost_root"
-echo "    - bin..............: $judgehost_bindir"
-echo "    - etc..............: $judgehost_etcdir"
-echo "    - lib..............: $judgehost_libdir"
-echo "    - libjudge.........: $judgehost_libjudgedir"
-echo "    - log..............: $judgehost_logdir"
-echo "    - run..............: $judgehost_rundir"
-echo "    - tmp..............: $judgehost_tmpdir"
-echo "    - judge............: $judgehost_judgedir"
-echo "    - chroot...........: $judgehost_chrootdir"
-echo "    - cgroup...........: $judgehost_cgroupdir"
+echo " * judgehost...........: AX_VAR_EXPAND($judgehost_root)"
+echo "    - bin..............: AX_VAR_EXPAND($judgehost_bindir)"
+echo "    - etc..............: AX_VAR_EXPAND($judgehost_etcdir)"
+echo "    - lib..............: AX_VAR_EXPAND($judgehost_libdir)"
+echo "    - libjudge.........: AX_VAR_EXPAND($judgehost_libjudgedir)"
+echo "    - log..............: AX_VAR_EXPAND($judgehost_logdir)"
+echo "    - run..............: AX_VAR_EXPAND($judgehost_rundir)"
+echo "    - tmp..............: AX_VAR_EXPAND($judgehost_tmpdir)"
+echo "    - judge............: AX_VAR_EXPAND($judgehost_judgedir)"
+echo "    - chroot...........: AX_VAR_EXPAND($judgehost_chrootdir)"
+echo "    - cgroup...........: AX_VAR_EXPAND($judgehost_cgroupdir)"
+echo ""
+echo " * systemd unit files..: AX_VAR_EXPAND($systemd_unitdir)"
 echo ""
 echo "Run 'make' without arguments to get a list of (build) targets."
 echo ""
 if test "x$BASEURL_UNCONFIGURED" = x1 ; then
-   echo "Warning: base URL is unconfigured; the submit client and generating"
-   echo "team documentation will not work out of the box!"
+   echo "Warning: base URL is unconfigured; generating team documentation will"
+   echo "not work out of the box!"
    echo "Rerun configure with option '--with-baseurl=BASEURL' to correct this."
    echo ""
 fi

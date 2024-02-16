@@ -110,6 +110,7 @@ char  *progname;
 char  *cmdname;
 char **cmdargs;
 char  *rootdir;
+char  *rootchdir;
 char  *stdoutfilename;
 char  *stderrfilename;
 char  *metafilename;
@@ -170,6 +171,7 @@ struct option const long_opts[] = {
 	{"root",       required_argument, NULL,         'r'},
 	{"user",       required_argument, NULL,         'u'},
 	{"group",      required_argument, NULL,         'g'},
+	{"chdir",      required_argument, NULL,         'd'},
 	{"walltime",   required_argument, NULL,         't'},
 	{"cputime",    required_argument, NULL,         'C'},
 	{"memsize",    required_argument, NULL,         'm'},
@@ -349,6 +351,7 @@ Run COMMAND with restrictions.\n\
   -r, --root=ROOT        run COMMAND with root directory set to ROOT\n\
   -u, --user=USER        run COMMAND as user with username or ID USER\n\
   -g, --group=GROUP      run COMMAND under group with name or ID GROUP\n\
+  -d, --chdir=DIR        change to directory DIR after setting root directory\n\
   -t, --walltime=TIME    kill COMMAND after TIME wallclock seconds\n\
   -C, --cputime=TIME     set maximum CPU time to TIME seconds\n\
   -m, --memsize=SIZE     set total memory limit to SIZE kB\n\
@@ -361,7 +364,7 @@ Run COMMAND with restrictions.\n\
   -e, --stderr=FILE      redirect COMMAND stderr output to FILE\n\
   -s, --streamsize=SIZE  truncate COMMAND stdout/stderr streams at SIZE kB\n\
   -E, --environment      preserve environment variables (default only PATH)\n\
-  -V, --variable         add additonal environment variables (in form KEY=VALUE;KEY2=VALUE2)\n\
+  -V, --variable         add additional environment variables (in form KEY=VALUE;KEY2=VALUE2)\n\
   -M, --outmeta=FILE     write metadata (runtime, exitcode, etc.) to FILE\n");
 	printf("\
   -v, --verbose          display some extra warnings and information\n\
@@ -372,8 +375,8 @@ Run COMMAND with restrictions.\n\
 Note that root privileges are needed for the `root' and `user' options.\n\
 If `user' is set, then `group' defaults to the same to prevent security\n\
 issues, since otherwise the process would retain group root permissions.\n\
-Additionally, Linux cgroup support is required for the `memsize' and\n\
-`cputime' options, and to report actual memory usage.\n\
+Additionally, Linux cgroup support is required for the `memsize', `cpuset'\n\
+and `cputime' options, and to report actual memory usage.\n\
 The COMMAND path is relative to the changed ROOT directory if specified.\n\
 TIME may be specified as a float; two floats separated by `:' are treated\n\
 as soft and hard limits. The runtime written to file is that of the last\n\
@@ -828,8 +831,10 @@ void setrestrictions()
 		free(path);
 
 		if ( chroot(".")!=0 ) error(errno,"cannot change root to `%s'",cwd);
-		/* Just to make sure and satisfy Coverity scan: */
 		if ( chdir("/")!=0 ) error(errno,"cannot chdir to `/' in chroot");
+		if ( rootchdir!=NULL ) {
+			if ( chdir(rootchdir)!=0 ) error(errno,"cannot chdir to `%s' in chroot", rootchdir);
+		}
 		verbose("using root-directory `%s'",cwd);
 	}
 
@@ -892,6 +897,12 @@ void pump_pipes(fd_set* readfds, size_t data_read[], size_t data_passed[])
 						verbose("splice failed, switching to read/write");
 						/* Setting errno here to repeat the copy. */
 						errno = EAGAIN;
+					}
+					if ( nread==-1 && errno==EPIPE ) {
+						/* This happens when the child process has
+						   exited and the pipe is closed. */
+						nread = 0;
+						errno = 0;
 					}
 				} else {
 					nread = read(child_pipefd[i][PIPE_OUT], buf, to_read);
@@ -971,7 +982,7 @@ int main(int argc, char **argv)
 	be_verbose = be_quiet = 0;
 	show_help = show_version = 0;
 	opterr = 0;
-	while ( (opt = getopt_long(argc,argv,"+r:u:g:t:C:m:f:p:P:co:e:s:EV:M:vq",long_opts,(int *) 0))!=-1 ) {
+	while ( (opt = getopt_long(argc,argv,"+r:u:g:d:t:C:m:f:p:P:co:e:s:EV:M:vq",long_opts,(int *) 0))!=-1 ) {
 		switch ( opt ) {
 		case 0:   /* long-only option */
 			break;
@@ -1002,6 +1013,11 @@ int main(int argc, char **argv)
 			rungroup = strdup(optarg);
 			if ( errno || *ptr!='\0' ) rungid = groupid(optarg);
 			if ( rungid<0 ) error(0,"invalid groupname or ID specified: `%s'",optarg);
+			break;
+		case 'd': /* chdir option */
+			rootchdir = (char *) malloc(strlen(optarg)+2);
+			if ( rootchdir==NULL ) error(errno,"allocating memory");
+			strcpy(rootchdir,optarg);
 			break;
 		case 't': /* wallclock time option */
 			use_walltime = 1;
@@ -1163,14 +1179,22 @@ int main(int argc, char **argv)
 		}
 	}
 	/* Make libcgroup ready for use */
-	ret = cgroup_init();
-	if ( ret!=0 ) {
-		error(0,"libcgroup initialization failed: %s(%d)\n", cgroup_strerror(ret), ret);
+	if ( use_cgroup() ) {
+		ret = cgroup_init();
+		if ( ret!=0 ) {
+			error(0,"libcgroup initialization failed: %s(%d)\n", cgroup_strerror(ret), ret);
+		}
 	}
 	/* Define the cgroup name that we will use and make sure it will
 	 * be unique. Note: group names must have slashes!
 	 */
-	snprintf(cgroupname, 255, "/domjudge/dj_cgroup_%d_%d/", getpid(), (int)time(NULL));
+	if ( cpuset!=NULL && strlen(cpuset)>0 ) {
+		strncpy(str, cpuset, 16);
+	} else {
+		str[0] = 0;
+	}
+	snprintf(cgroupname, 255, "/domjudge/dj_cgroup_%d_%.16s_%d.%06d/",
+	         getpid(), str, (int)progstarttime.tv_sec, (int)progstarttime.tv_usec);
 
 	cgroup_create();
 
@@ -1386,7 +1410,7 @@ int main(int argc, char **argv)
 			exitcode = WEXITSTATUS(status);
 		}
 
-		double cputime;
+		double cputime = -1;
 		output_cgroup_stats(&cputime);
 		cgroup_kill();
 		cgroup_delete();

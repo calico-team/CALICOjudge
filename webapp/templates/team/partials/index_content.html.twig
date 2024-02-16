@@ -15,11 +15,14 @@
 
     <div class="mt-4" data-flash-messages>
         {% include 'partials/messages.html.twig' %}
+        {% if not contest.allowSubmit %}
+            {% include 'partials/alert.html.twig' with {'type': 'danger', 'message': 'Submissions (temporarily) disabled.'} %}
+        {% endif %}
     </div>
 
     <div class="row">
         <div class="col">
-            <h3 class="teamoverview">Submissions</h3>
+            <h1 class="teamoverview">Submissions</h1>
 
             {% include 'team/partials/submission_list.html.twig' with {showTestcases: true} %}
         </div>
@@ -31,7 +34,7 @@
                 {% include 'team/partials/clarification_list.html.twig' with {clarifications: clarifications} %}
             {% endif %}
 
-            <h3 class="teamoverview">Clarification Requests</h3>
+            <h1 class="teamoverview">Clarification Requests</h1>
             {% if clarificationRequests is empty %}
                 <p class="nodata">No clarification request.</p>
             {% else %}

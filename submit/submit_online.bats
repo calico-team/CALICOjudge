@@ -1,84 +1,104 @@
 #!/usr/bin/env bats
 
 # These tests assume presence of a running DOMjudge instance at the
-# compiled-in baseurl that has the DOMjudge example data loaded.
+# baseurl specified in the `paths.mk` file one directory up.
+
+load 'assert'
 
 setup() {
     export SUBMITCONTEST="demo"
+    export SUBMITBASEURL="$(grep '^BASEURL' ../paths.mk | tr -s ' ' | cut -d ' ' -f 3)"
 }
 
 @test "contest via parameter overrides environment" {
     run ./submit -c bestaatniet
-    echo $output | grep "error: no (valid) contest specified"
+    assert_failure 1
+    assert_partial "error: No (valid) contest specified"
+
     run ./submit --contest=bestaatookniet
-    echo $output | grep "error: no (valid) contest specified"
-    [ "$status" -eq 1 ]
+    assert_failure 1
+    assert_partial "error: No (valid) contest specified"
 }
 
 @test "hello problem id and name are in help output" {
     run ./submit --help
-    echo $output | grep "hello *- *Hello World"
-    [ "$status" -eq 0 ]
+    assert_success
+    assert_regex "A *- *Hello World"
 }
 
 @test "languages and extensions are in help output" {
     run ./submit --help
-    echo $output | grep "C: *c"
-    echo $output | grep "C++: *cpp, cc, cxx, c++"
-    echo $output | grep "Java: *java"
+    assert_success
+    assert_regex "C *- *c"
+    assert_regex "C\+\+ *- *c\+\+, cc, cpp, cxx"
+    assert_regex "Java *- *java"
 }
 
 @test "stale file emits warning" {
     touch -d '2000-01-01' $BATS_TMPDIR/test-hello.c
-    run ./submit -p hello $BATS_TMPDIR/test-hello.c <<< "n"
-    echo $output | grep "test-hello.c' has not been modified for [0-9]* minutes!"
+    run ./submit -p A $BATS_TMPDIR/test-hello.c <<< "n"
+    assert_regex "test-hello.c' has not been modified for [0-9]* minutes!"
 }
 
 @test "recent file omits warning" {
     touch $BATS_TMPDIR/test-hello.c
-    run ./submit -p hello $BATS_TMPDIR/test-hello.c <<< "n"
-    echo $output | grep -v "test-hello.c' has not been modified for [0-9]* minutes!"
+    run ./submit -p A $BATS_TMPDIR/test-hello.c <<< "n"
+    refute_line -e "test-hello.c' has not been modified for [0-9]* minutes!"
 }
 
 @test "binary file emits warning" {
-    cp ./submit $BATS_TMPDIR/binary.c
-    run ./submit -p hello $BATS_TMPDIR/binary.c <<< "n"
-    echo $output | grep "binary.c' is detected as binary/data!"
+    cp $(which bash) $BATS_TMPDIR/binary.c
+    run ./submit -p A $BATS_TMPDIR/binary.c <<< "n"
+    assert_partial "binary.c' is detected as binary/data!"
 }
 
 @test "empty file emits warning" {
     touch $BATS_TMPDIR/empty.c
-    run ./submit -p hello $BATS_TMPDIR/empty.c <<< "n"
-    echo $output | grep "empty.c' is empty"
+    run ./submit -p A $BATS_TMPDIR/empty.c <<< "n"
+    assert_partial "empty.c' is empty"
 }
 
 @test "detect problem name and language" {
-    cp ../tests/test-hello.java $BATS_TMPDIR/hello.java
-    run ./submit $BATS_TMPDIR/hello.java <<< "n"
-    [ "${lines[1]}" = "Submission information:" ]
-    [ "${lines[4]}" = "  problem:     hello" ]
-    [ "${lines[5]}" = "  language:    Java" ]
+    cp ../example_problems/hello/submissions/accepted/test-hello.java $BATS_TMPDIR/A.java
+    run ./submit $BATS_TMPDIR/A.java <<< "n"
+    assert_line "Submission information:"
+    assert_line "  problem:     A"
+    assert_line "  language:    Java"
 }
 
 @test "options override detection of problem name and language" {
-    cp ../tests/test-hello.java $BATS_TMPDIR/hello.java
-    run ./submit -p boolfind -l cpp $BATS_TMPDIR/hello.java <<< "n"
-    [ "${lines[1]}" = "Submission information:" ]
-    [ "${lines[4]}" = "  problem:     boolfind" ]
-    [ "${lines[5]}" = "  language:    C++" ]
+    cp ../example_problems/hello/submissions/accepted/test-hello.java $BATS_TMPDIR/A.java
+    run ./submit -p C -l cpp $BATS_TMPDIR/A.java <<< "n"
+    assert_line "Submission information:"
+    assert_line "  problem:     C"
+    assert_line "  language:    C++"
+}
+
+@test "non existing problem name emits error" {
+    cp ../example_problems/hello/submissions/accepted/test-hello.java $BATS_TMPDIR/A.java
+    run ./submit -p nonexistent -l cpp $BATS_TMPDIR/A.java <<< "n"
+    assert_failure 1
+    assert_partial "error: No known problem specified or detected"
+}
+
+@test "non existing language name emits error" {
+    cp ../example_problems/hello/submissions/accepted/test-hello.java $BATS_TMPDIR/hello.java
+    run ./submit -p C -l nonexistent $BATS_TMPDIR/hello.java <<< "n"
+    assert_failure 1
+    assert_partial "error: No known language specified or detected"
 }
 
 @test "detect entry point Java" {
     skip "Java does not require an entry point in the default installation"
-    run ./submit -p hello ../tests/test-hello.java <<< "n"
-    echo "$output" | grep '  entry point: test-hello'
+    run ./submit -p A ../example_problems/hello/submissions/accepted/test-hello.java <<< "n"
+    assert_line '  entry point: test-hello'
 }
 
 @test "detect entry point Python" {
-    skip "Python not enabled in the default installation"
+    skip "Python does not require an entry point in the default installation"
     touch $BATS_TMPDIR/test-extra.py
-    run ./submit -p hello ../tests/test-hello.py $BATS_TMPDIR/test-extra.py <<< "n"
-    echo "$output" | grep '  entry point: test-hello.py'
+    run ./submit -p A ../example_problems/hello/submissions/accepted/test-hello.py $BATS_TMPDIR/test-extra.py <<< "n"
+    assert_line '  entry point: test-hello.py'
 }
 
 @test "detect entry point Kotlin" {
@@ -86,30 +106,33 @@ setup() {
     if ! echo "$output" | grep 'Kotlin:' ; then
         skip "Kotlin not enabled"
     fi
-    run ./submit -p hello ../tests/test-hello.kt <<< "n"
-    echo "$output" | grep '  entry point: Test_helloKt'
+    run ./submit -p A ../example_problems/hello/submissions/accepted/test-hello.kt <<< "n"
+    assert_line '  entry point: Test_helloKt'
 }
 
 @test "options override entry point" {
-    run ./submit -p hello -e Main ../tests/test-hello.java <<< "n"
-    echo "$output" | grep '  entry point: Main'
-    run ./submit -p hello --entry_point=mypackage.Main ../tests/test-hello.java <<< "n"
-    echo "$output" | grep '  entry point: mypackage.Main'
+    run ./submit -p A -e Main ../example_problems/hello/submissions/accepted/test-hello.java <<< "n"
+    assert_line '  entry point: Main'
+
+    run ./submit -p A --entry_point=mypackage.Main ../example_problems/hello/submissions/accepted/test-hello.java <<< "n"
+    assert_line '  entry point: mypackage.Main'
 }
 
 @test "accept multiple files" {
-    cp ../tests/test-hello.java ../tests/test-classname.java ../tests/test-package.java $BATS_TMPDIR/
-    run ./submit -p hello $BATS_TMPDIR/test-*.java <<< "n"
-    [ "${lines[2]}" = "  filenames:   $BATS_TMPDIR/test-classname.java $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java" ]
+    cp ../example_problems/hello/submissions/accepted/test-hello.java ../example_problems/hello/submissions/multiple/test-classname.java ../example_problems/hello/submissions/multiple/test-package.java $BATS_TMPDIR/
+    run ./submit -p A $BATS_TMPDIR/test-*.java <<< "n"
+    assert_line "  filenames:   $BATS_TMPDIR/test-classname.java $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java"
 }
 
 @test "deduplicate multiple files" {
-    cp ../tests/test-hello.java ../tests/test-package.java $BATS_TMPDIR/
-    run ./submit -p hello $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java <<< "n"
-    [ "${lines[2]}" = "  filenames:   $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java" ]
+    cp ../example_problems/hello/submissions/accepted/test-hello.java ../example_problems/hello/submissions/multiple/test-package.java $BATS_TMPDIR/
+    run ./submit -p A $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java <<< "n"
+    assert_line "  filenames:   $BATS_TMPDIR/test-hello.java $BATS_TMPDIR/test-package.java"
 }
 
 @test "submit solution" {
-    run ./submit -y -p hello ../tests/test-hello.c
-    echo $output | grep "Submission received, id = s[0-9]*"
+    run ./submit -y -p A ../example_problems/hello/submissions/accepted/test-hello.c
+    assert_success
+    assert_regex "Submission received: id = s[0-9]*, time = [0-9]{2}:[0-9]{2}:[0-9]{2}"
+    assert_regex "Check http[^ ]*/[0-9]* for the result."
 }

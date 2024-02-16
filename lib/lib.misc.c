@@ -28,19 +28,19 @@ void _alert(const char *libdir, const char *msgtype, const char *description)
 {
 	static char none[1] = "";
 	char *cmd;
-	int dummy __attribute__((unused));
+	int silenced __attribute__((unused));
 
 	if ( description==NULL ) description = none;
 
 	cmd = allocstr("%s/alert '%s' '%s' &",libdir,msgtype,description);
 	logmsg(LOG_INFO,"executing '%s'",cmd);
 
-	/* Assign return value to dummy variable to remove compiler
+	/* Assign return value to temp variable to remove compiler
 	 * warnings. We're already trying to generate a warning; there's
 	 * no sense in generating another warning when this gives an
 	 * error.
 	 */
-	dummy = system(cmd);
+	silenced = system(cmd);
 
 	free(cmd);
 }
@@ -54,7 +54,7 @@ int execute(const char *cmd, const char **args, int nargs, int stdio_fd[3], int 
 	char **argv;
 	int i, dir;
 
-	if ( (argv=(char **) malloc((nargs+2)*sizeof(char **)))==NULL ) return -1;
+	if ( (argv=(char **) malloc((nargs+2)*sizeof(char *)))==NULL ) return -1;
 
 	if ( err2out ) stdio_fd[2] = FDREDIR_NONE;
 

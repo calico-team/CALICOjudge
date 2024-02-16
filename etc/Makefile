@@ -16,7 +16,7 @@ include $(TOPDIR)/Makefile.global
 SECRETS = dbpasswords.secret restapi.secret symfony_app.secret initial_admin_password.secret
 
 SUBST_CONFIGS = apache.conf nginx-conf nginx-conf-inner domjudge-fpm.conf domserver-static.php \
-                judgehost-static.php runguard-config.h submit-config.h \
+                judgehost-static.php runguard-config.h \
                 sudoers-domjudge
 
 $(SUBST_CONFIGS): %: %.in $(TOPDIR)/paths.mk
@@ -26,25 +26,25 @@ config: $(SUBST_CONFIGS)
 
 domserver: apache.conf nginx-conf nginx-conf-inner $(SECRETS)
 
-judgehost:
+judgehost: restapi.secret
 
 $(SECRETS):
 	./gen_all_secrets $(subst 1,-q,$(QUIET))
 
 install-domserver:
 	$(INSTALL_DATA) -t $(DESTDIR)$(domserver_etcdir) \
-		apache.conf nginx-conf nginx-conf-inner domserver-static.php domjudge-fpm.conf shadowing.yaml.dist
+		apache.conf nginx-conf nginx-conf-inner domserver-static.php domjudge-fpm.conf docs.yaml.dist
 	$(INSTALL_PROG) -t $(DESTDIR)$(domserver_etcdir) \
 		genadminpassword gendbpasswords genrestapicredentials gensymfonysecret gen_all_secrets
 	$(INSTALL_DATA) -t $(DESTDIR)$(domserver_etcdir) \
-		domserver-config.php common-config.php verdicts.php db-config.yaml
+		verdicts.php db-config.yaml
 # Password files are installed from root Makefile.
 
-install-judgehost:
+install-judgehost: judgehost-static.php sudoers-domjudge
 	$(INSTALL_DATA) -t $(DESTDIR)$(judgehost_etcdir) \
 		judgehost-static.php sudoers-domjudge genrestapicredentials
 	$(INSTALL_DATA) -t $(DESTDIR)$(judgehost_etcdir) \
-		judgehost-config.php common-config.php
+		judgehost-config.php
 # Password files are installed from root Makefile.
 
 # Let only distclean (_not_ the local variant) depend on password

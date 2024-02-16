@@ -14,7 +14,6 @@ use App\Service\DOMJudgeService;
 use App\Service\ScoreboardService;
 use App\Utils\FreezeData;
 use App\Utils\Scoreboard\Scoreboard;
-use Exception;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -36,60 +35,20 @@ use Twig\Error\RuntimeError;
 use Twig\Error\SyntaxError;
 use ZipArchive;
 
-
 /**
  * Class ScoreboardMergeCommand
  * @package App\Command
  */
 class ScoreboardMergeCommand extends Command
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected Environment $twig;
+    protected HttpClientInterface $client;
+    protected ScoreboardService $scoreboardService;
+    protected RouterInterface $router;
+    protected string $projectDir;
 
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var Environment
-     */
-    protected $twig;
-
-    /**
-     * @var HttpClientInterface
-     */
-    protected $client;
-
-    /**
-     * @var ScoreboardService
-     */
-    protected $scoreboardService;
-
-    /**
-     * @var RouterInterface
-     */
-    protected $router;
-
-    /**
-     * @var string
-     */
-    protected $projectDir;
-
-    /**
-     * ScoreboardMergeCommand constructor.
-     *
-     * @param DOMJudgeService      $dj
-     * @param ConfigurationService $config
-     * @param Environment          $twig
-     * @param HttpClientInterface  $client
-     * @param ScoreboardService    $scoreboardService
-     * @param RouterInterface      $router
-     * @param string               $projectDir
-     * @param string|null          $name
-     */
     public function __construct(
         DOMJudgeService $dj,
         ConfigurationService $config,
@@ -110,18 +69,16 @@ class ScoreboardMergeCommand extends Command
         $this->projectDir = $projectDir;
     }
 
-    /**
-     * @inheritdoc
-     */
-    protected function configure()
+    protected function configure(): void
     {
         $this
             ->setName('scoreboard:merge')
             ->setDescription('Merges scoreboards from multiple sites from API endpoints.')
-            ->setHelp('Usage example: scoreboard:merge "BAPC preliminaries" ' .
-                      'https://judge.gehack.nl/api/v4/contests/3/ 3 ' .
-                      'http://ragnargrootkoerkamp.nl/upload/uva 2' . PHP_EOL . PHP_EOL .
-                      'This fetches teams and scoreboard data from API endpoints and prints a merged HTML scoreboard. It assumes times in minutes.'
+            ->setHelp(
+                'Usage example: scoreboard:merge "BAPC preliminaries" ' .
+                'https://judge.gehack.nl/api/v4/contests/3/ 3 ' .
+                'http://ragnargrootkoerkamp.nl/upload/uva 2' . PHP_EOL . PHP_EOL .
+                'This fetches teams and scoreboard data from API endpoints and prints a merged HTML scoreboard. It assumes times in minutes.'
             )
             ->addOption(
                 'category',
@@ -151,7 +108,6 @@ class ScoreboardMergeCommand extends Command
     }
 
     /**
-     * @inheritdoc
      * @throws ClientExceptionInterface
      * @throws DecodingExceptionInterface
      * @throws RedirectionExceptionInterface
@@ -160,9 +116,8 @@ class ScoreboardMergeCommand extends Command
      * @throws LoaderError
      * @throws RuntimeError
      * @throws SyntaxError
-     * @throws Exception
      */
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $style = new SymfonyStyle($input, $output);
         $teams = [];
@@ -268,7 +223,7 @@ class ScoreboardMergeCommand extends Command
             }
 
             $scoreboardData = $this->client
-                ->request('GET', $path . '/scoreboard')
+                ->request('GET', $path . '/scoreboard?public=1')
                 ->toArray();
 
             if ($contest->getStarttimeString() === null) {
@@ -281,8 +236,8 @@ class ScoreboardMergeCommand extends Command
                     ->setFinalizetime($state['ended'])
                     ->setDeactivatetimeString($state['ended'])
                     ->updateTimes();
-                $freezeData = new FreezeData($contest);
             }
+            $freezeData = new FreezeData($contest);
 
             // Add scoreboard data
             foreach ($scoreboardData['rows'] as $row) {
@@ -414,6 +369,6 @@ class ScoreboardMergeCommand extends Command
 
         $style->success(sprintf('Merged scoreboard data written to %s',
                                 $input->getArgument('output-file')));
-        return 0;
+        return static::SUCCESS;
     }
 }

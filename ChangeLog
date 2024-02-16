@@ -1,5 +1,159 @@
 DOMjudge Programming Contest Judging System
 
+Version 8.2.2 - 20 October 2023
+-------------------------------
+ - Bugfix to prevent errors when running a bare-install or deleting all
+   contests.
+
+Version 8.2.1 - 29 May 2023
+---------------------------
+ - Set the default domjudge_user to the current user at configure time.
+ - Various bugfixes.
+ - Adhere to CLICS 2022-07 again.
+ - Prevent overwriting of local .netrc when installing examples.
+ - Fixed some w3c html violations.
+ - Clarify the need for cgroupv1 when chroot creating fails.
+ - Fix medal awards when skipping categories.
+ - Do not allow to delete problems from a locked contest in the UI.
+ - Disallow submitting to a problem when it does not have testcases at import.
+ - Fix handling of binary files when editing executables.
+ - Recalculate all immutable hashes since the algorithm changed in the past.
+
+Version 8.2.0 - 6 March 2023
+----------------------------
+ - Various bugfixes & UI improvements.
+ - Add support for Rust as submission language.
+ - Add teamphotos to scoreboard zip.
+ - Add jury option to to download ZIP with all problem samples, attachments
+   and problem statement.
+ - Extend team import with optional room and other API extensions, see the API
+   doc for further details.
+ - Drop support for shadowing a single contest from multiple sources.
+ - Log account logins via API separately.
+ - Add support for PHP v8.2.
+ - Upgraded library dependencies.
+ - Removed output of detected entry point to teams.
+ - Added option to add custom apt repositories to judge chroot.
+ - Added CLI script to configure the domserver with a yaml file.
+ - Changed activation behaviour of contests imported via UI to be directly
+   available.
+ - New option added to reset login status of teams between contests.
+ - Highlight submissions which were judged with compiler flags which since
+   have changed. Useful when you find wrong flags during the contest.
+ - Handle network errors for judgedaemon when domserver is unavailable.
+ - Added super lazy mode useful for ICPC analyst instances. Here nothing is
+   judged unless manually requested.
+ - Split problem import messages in info/warning/danger, to make sure errors
+   are not missed when importing.
+ - Store user login sessions in database.
+ - Contest import CLI script is now rewritten in python.
+ - The example test problems are now imported via the contest package format.
+
+Version 8.1.0 - 1 June 2022
+---------------------------
+ - Document that minimum PHP version is now 7.4.0.
+ - Add support for PHP 8.1.
+ - Upgrade Symfony to 5.4 LTS and upgrade other library dependencies.
+ - Replace calls to deprecated `strftime` with `date`. Note: if you have
+   configured a custom `time_format`, you need to update it to the format
+   supported by `date`.
+ - Dropped the presentation-error verdict, databases from before DOMjudge 5.0
+   will be altered to replace the verdict with wrong-answer.
+ - Changed API import to give admin users a team.
+ - Balloon users can now be created via the API.
+ - Shadow mode will now fix missing data by reading from the primary CCS.
+ - Fixed cgroup naming for docker to prevent sharing the same container.
+ - Removed python2 in the chroot, remove python3 in favor of pypy3 in chroot.
+ - Added support for sentry for logging.
+ - Added default external IDs on all places.
+ - Fixed medals on scoreboard for filtered scoreboards.
+ - Dropped old balloons CLI.
+ - Reimplementation of runpipe for interactive problems.
+ - Individual files can now be removed from executables.
+ - Added mysql socket option, for when port/IP is not used.
+ - Added support for accounts.{yaml,json} for import script.
+ - Added support for judgeremaining for problems.
+ - Add option to delete existing testcases/attachments/other data when
+   importing a problem.
+ - Dropped support for ICPC results HTML export feature.
+ - Balloon runners can now always see the frozen scoreboard.
+ - Custom CSS can now be used for the login page.
+ - Removed option to use multiple timezones in same contest.
+ - Fixed kotlin compile script for modern versions.
+
+Version 8.0.0 - 30 January 2022
+-------------------------------
+ - Compilation of submissions now happens inside the chroot.
+   NOTE when upgrading: you need to install compilers and other
+   dependencies for the compile phase inside the DOMjudge chroot.
+   Also you need to remove the '--tmpdir' switch from the mktemp
+   call in the java_javac_detect compile script (when using this).
+ - Python 3 now uses pypy by default and is default enabled on new
+   installations.
+ - Improve performance with large amounts of affiliations.
+ - Judging verifier is now also available to jury users.
+ - Search for @EXPECTED_RESULTS@ marker in all submitted files
+   to validate test submissions.
+ - Allow users to specify their full name in self-registration.
+ - Add metrics API endpoint for use with Prometheus.
+ - Always show banner.png, if present, on the public scoreboard.
+ - Upgrade bundled libraries.
+ - Add problem statistics to team/public problem pages.
+ - Add support for specifying database port.
+ - Update API documentation to OpenAPI 3.
+ - Add support for loading custom CSS and JavaScript.
+ - Speed up loading team pictures and affiliation logos.
+ - Add filter on result to jury submissions page.
+ - Add API actions to create single team, team affiliation, team category and user.
+ - Add problem attachment support.
+ - Judge a single submission on multiple judgedaemons in parallel if the
+   judging queue is empty.
+ - Limit the size of the program output stored by default in the database;
+   with a button in the UI to retrieve the full output.
+ - Add new clarification handler role.
+ - Reduce cost of the hash function to handle large amounts of accounts when
+   generating or storing passwords.
+ - Improve API action to add submission to adhere to the CCS spec.
+ - Add API action to create clarification following CCS spec.
+ - Add support for showing (pending) awards on the scoreboard. Thanks @shuibinlong!
+ - Remove JudgehostRestriction feature due to new Judgehost API.
+ - Replace C++ submit client with (standalone) Python version.
+ - Remove old way to run interactive problems.
+   NOTE when upgrading: if you have an old-style interactive problem, you need
+   to convert it to the new style (see 'boolfind' example) or change it to
+   include the old run_wrapper.
+ - Replace jscolor by coloris.
+ - Created insights page in current work queue
+ - Increase performance by not dynamically loading classes.
+ - Added alternative inplace install mode
+ - Added PHP8.0 support
+ - Add option to default pause new judgedaemons
+ - Added medals to scoreboard
+ - Warn contestants if file has not been modified for some time
+ - Make public/team pages mostly WCAG2A compliant
+ - Add support to import multiple accounts per team and IP addresses for users.
+
+Version 7.3.2 - 23 November 2020
+--------------------------------
+ - Be more tolerant of empty lines in restapi.secret.
+ - Fix team manual build failure with recent rst2pdf versions.
+ - Update URL for imports from ICPC CMS.
+ - Fix team count on jury contest overview screen.
+ - Truncate output for sample runs on team pages.
+ - Fix compatibility with MySQL 8.x.
+
+Version 7.3.1 - 10 November 2020
+--------------------------------
+ - Fix chroot install on Ubuntu 20.04.
+ - Fix results.hml and results.tsv output.
+ - Fix race condition in scoreboard related to a Doctrine bug.
+ - Fix having fresh data for scheduling repeated rejudgings.
+ - Fix clarification filter buttons when not using queues.
+ - Fix database user creation for MySQL >= 8.0.
+ - Fix warning about DataTables initialization on judgehosts page.
+ - Documentation improvements.
+
+
 Version 7.3.0 - 26 June 2020
 ----------------------------
  - Move specification of database configuration out of database and into
@@ -41,7 +195,7 @@ Version 7.2.1 - 6 May 2020
  - Various small fixes to the build/install system.
  - Fix user IP address field to accept IPv6 addresses.
  - Fix and document static scoreboard contest selection feature.
- - Fix a sed error message on internal compile error. 
+ - Fix a sed error message on internal compile error.
  - Fix link to documentation from the admin index page.
  - Fix problem text links from scoreboard header.
  - Fix that country select fields are hidden when show_flags is off.

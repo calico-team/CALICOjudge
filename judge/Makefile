@@ -6,7 +6,7 @@ include $(TOPDIR)/Makefile.global
 TARGETS = runguard runpipe evict
 
 SUBST_FILES = judgedaemon chroot-startstop.sh create_cgroups \
-              create-cgroups.service domjudge-judgehost.service
+              create-cgroups.service domjudge-judgedaemon@.service
 
 judgehost: $(TARGETS) $(SUBST_FILES)
 
@@ -27,15 +27,17 @@ runpipe: runpipe.cc $(LIBHEADERS) $(LIBSOURCES)
 
 install-judgehost:
 	$(INSTALL_PROG) -t $(DESTDIR)$(judgehost_libjudgedir) \
-		compile*.sh testcase_run.sh chroot-startstop.sh \
+		compile.sh build_executable.sh testcase_run.sh chroot-startstop.sh \
 		check_diff.sh evict
 	$(INSTALL_DATA) -t $(DESTDIR)$(judgehost_libjudgedir) \
-		judgedaemon.main.php
+		judgedaemon.main.php run-interactive.sh
 	$(INSTALL_PROG) -t $(DESTDIR)$(judgehost_bindir) \
-        judgedaemon runguard runpipe create_cgroups
-	$(INSTALL_DIR)     $(DESTDIR)$(libdir)/systemd/system/
-	$(INSTALL_DATA) -t $(DESTDIR)$(libdir)/systemd/system/ \
-        create-cgroups.service domjudge-judgehost.service
+		judgedaemon runguard runpipe create_cgroups
+ifneq ($(systemd_unitdir),)
+	$(INSTALL_DIR)     $(DESTDIR)$(systemd_unitdir)
+	$(INSTALL_DATA) -t $(DESTDIR)$(systemd_unitdir) \
+		create-cgroups.service domjudge-judgehost.target domjudge-judgedaemon@.service
+endif
 
 clean-l:
 	-rm -f $(TARGETS) $(TARGETS:%=%$(OBJEXT))

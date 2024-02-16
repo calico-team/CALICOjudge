@@ -4,7 +4,6 @@ namespace App\Service;
 
 use App\Entity\ContestProblem;
 use App\Entity\Executable;
-use App\Entity\Judgehost;
 use App\Entity\Language;
 use App\Entity\Problem;
 use App\Entity\Team;
@@ -13,8 +12,11 @@ use App\Entity\TeamCategory;
 use App\Entity\Testcase;
 use App\Entity\User;
 use App\Utils\Utils;
-use Doctrine\Common\Inflector\Inflector;
+use BadMethodCallException;
+use Doctrine\Inflector\InflectorFactory;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Stopwatch\Stopwatch;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\RouterInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
@@ -24,40 +26,15 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
  */
 class CheckConfigService
 {
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * @var ValidatorInterface
-     */
-    protected $validator;
-
-    /**
-     * @var RouterInterface
-     */
-    protected $router;
-
-    /**
-     * @var bool
-     */
-    protected $debug;
+    protected EntityManagerInterface $em;
+    protected ConfigurationService $config;
+    protected DOMJudgeService $dj;
+    protected EventLogService $eventLogService;
+    protected ValidatorInterface $validator;
+    protected RouterInterface $router;
+    protected bool $debug;
+    protected UserPasswordHasherInterface $passwordHasher;
+    protected Stopwatch $stopwatch;
 
     public function __construct(
         bool $debug,
@@ -66,7 +43,8 @@ class CheckConfigService
         DOMJudgeService $dj,
         EventLogService $eventLogService,
         RouterInterface $router,
-        ValidatorInterface $validator
+        ValidatorInterface $validator,
+        UserPasswordHasherInterface $passwordHasher
     ) {
         $this->debug           = $debug;
         $this->em              = $em;
@@ -75,12 +53,15 @@ class CheckConfigService
         $this->eventLogService = $eventLogService;
         $this->router          = $router;
         $this->validator       = $validator;
+        $this->passwordHasher  = $passwordHasher;
+        $this->stopwatch       = new Stopwatch();
     }
 
-    public function runAll()
+    public function runAll(): array
     {
         $results = [];
 
+        $this->stopwatch->openSection();
         $system = [
             'php_version' => $this->checkPhpVersion(),
             'php_extensions' => $this->checkPhpExtensions(),
@@ -89,68 +70,76 @@ class CheckConfigService
         ];
 
         $results['System'] = $system;
+        $this->stopwatch->stopSection('System');
 
+        $this->stopwatch->openSection();
         $config = [
             'adminpass' => $this->checkAdminPass(),
             'comparerun' => $this->checkDefaultCompareRunExist(),
             'filesizememlimit' => $this->checkScriptFilesizevsMemoryLimit(),
             'debugdisabled' => $this->checkDebugDisabled(),
             'tmpdirwritable' => $this->checkTmpdirWritable(),
+            'hashtime' => $this->checkHashTime(),
         ];
 
         $results['Configuration'] = $config;
+        $this->stopwatch->stopSection('Configuration');
 
+        $this->stopwatch->openSection();
         $contests = [
             'activecontests' => $this->checkContestActive(),
             'validcontests' => $this->checkContestsValidate(),
+            'banners' => $this->checkContestBanners(),
         ];
 
         $results['Contests'] = $contests;
+        $this->stopwatch->stopSection('Contests');
 
+        $this->stopwatch->openSection();
         $pl = [
             'problems' => $this->checkProblemsValidate(),
             'languages' => $this->checkLanguagesValidate(),
-            'judgability' => $this->checkProblemLanguageJudgability(),
         ];
 
         $results['Problems and languages'] = $pl;
+        $this->stopwatch->stopSection('Problems and languages');
 
+        $this->stopwatch->openSection();
         $teams = [
+            'photos' => $this->checkTeamPhotos(),
             'affiliations' => $this->checkAffiliations(),
             'teamdupenames' => $this->checkTeamDuplicateNames(),
             'selfregistration' => $this->checkSelfRegistration(),
         ];
 
         $results['Teams'] = $teams;
+        $this->stopwatch->stopSection('Teams');
 
+        $this->stopwatch->openSection();
         $results['External identifiers'] = $this->checkAllExternalIdentifiers();
+        $this->stopwatch->stopSection('External identifiers');
 
         return $results;
     }
 
-    public function checkPhpVersion()
+    public function checkPhpVersion(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $my = PHP_VERSION;
-        $req = '7.2.5';
+        $req = '7.4.0';
         $result = version_compare($my, $req, '>=');
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'PHP version',
                 'result' => ($result ? 'O' : 'E'),
                 'desc' => sprintf('You have PHP version %s. The minimum required is %s', $my, $req)];
     }
 
-    public function checkPhpExtensions()
+    public function checkPhpExtensions(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $required = ['json', 'mbstring', 'mysqli', 'zip', 'gd', 'intl'];
-        $optional = ['curl' => 'exporting to/importing from Baylor website'];
-
-        $state = 'O'; $remark = '';
-        foreach ($optional as $ext => $why) {
-            if (!extension_loaded($ext)) {
-                $state = 'W';
-                $remark .= sprintf("Optional PHP extension '%s' not loaded; needed for %s\n",
-                    $ext, $why);
-            }
-        }
+        $state = 'O';
+        $remark = '';
         foreach ($required as $ext) {
             if (!extension_loaded($ext)) {
                 $state = 'E';
@@ -159,13 +148,15 @@ class CheckConfigService
         }
         $remark = ($remark ?: 'All required and recommended extensions present.');
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'PHP extensions',
                 'result' => $state,
                 'desc' => $remark];
     }
 
-    public function checkPhpSettings()
+    public function checkPhpSettings(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $sourcefiles_limit = $this->config->get('sourcefiles_limit');
         $max_files = ini_get('max_file_uploads');
 
@@ -185,7 +176,7 @@ class CheckConfigService
         $sizes = [];
         $postmaxvars = ['post_max_size', 'memory_limit', 'upload_max_filesize'];
         foreach ($postmaxvars as $var) {
-            /* skip 0 or empty values, and -1 which means 'unlimited' */
+            // Skip 0 or empty values, and -1 which means 'unlimited'.
             if ($size = Utils::phpiniToBytes(ini_get($var))) {
                 if ($size != '-1') {
                     $sizes[$var] = $size;
@@ -203,21 +194,37 @@ class CheckConfigService
                     (isset($sizes[$var]) ? Utils::printsize($sizes[$var]) : "unlimited"));
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'PHP settings',
                 'result' => $result,
                 'desc' => $desc];
     }
 
-    public function checkMysqlSettings()
+    public function checkMysqlSettings(): array
     {
-        $r = $this->em->getConnection()->fetchAll('SHOW variables WHERE Variable_name IN
-                        ("innodb_log_file_size", "max_connections", "max_allowed_packet", "tx_isolation")');
+        $this->stopwatch->start(__FUNCTION__);
+        $r = $this->em->getConnection()->fetchAllAssociative(
+            'SHOW variables WHERE Variable_name IN
+                 ("innodb_log_file_size", "max_connections", "max_allowed_packet",
+                  "tx_isolation", "transaction_isolation")'
+        );
         $vars = [];
         foreach ($r as $row) {
             $vars[$row['Variable_name']] = $row['Value'];
         }
-        $max_inout_r = $this->em->getConnection()->fetchAll('SELECT GREATEST(MAX(LENGTH(input)),MAX(LENGTH(output))) as max FROM testcase_content');
+        # MySQL 8 has "transaction_isolation" instead of "tx_isolation".
+        if (isset($vars['transaction_isolation'])) {
+            $vars['tx_isolation'] = $vars['transaction_isolation'];
+        }
+        $max_inout_r = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT GREATEST(MAX(LENGTH(input)),MAX(LENGTH(output))) as max FROM testcase_content'
+        );
         $max_inout = (int)reset($max_inout_r)['max'];
+        $output_limit = 1024*$this->config->get('output_limit');
+        if ($this->config->get('output_storage_limit') >= 0) {
+            $output_limit = 1024*$this->config->get('output_storage_limit');
+        }
+        $max_inout = max($max_inout, $output_limit);
 
         $result = 'O';
         $desc = '';
@@ -228,7 +235,7 @@ class CheckConfigService
 
         if ($vars['innodb_log_file_size'] < 10 * $max_inout) {
             $result = 'W';
-            $desc .= sprintf("MySQL's innodb_log_file_size is set to %s. You may want to raise this to 10x the maximum test case size (now %s).\n", Utils::printsize((int)$vars['innodb_log_file_size']), Utils::printsize($max_inout));
+            $desc .= sprintf("MySQL's innodb_log_file_size is set to %s. You may want to raise this to 10x the maximum of the test case size and output (storage) limit (now %s).\n", Utils::printsize((int)$vars['innodb_log_file_size']), Utils::printsize($max_inout));
         }
 
         $tx = ['REPEATABLE-READ', 'SERIALIZABLE'];
@@ -240,19 +247,21 @@ class CheckConfigService
         $recommended_max_allowed_packet = 16*1024*1024;
         if ($vars['max_allowed_packet'] < 2*$max_inout) {
             $result = 'E';
-            $desc .= sprintf("MySQL's max_allowed_packet is set to %s. You may want to raise this to about twice the maximum test case size (currently %s).\n", Utils::printsize((int)$vars['max_allowed_packet']), Utils::printsize($max_inout));
+            $desc .= sprintf("MySQL's max_allowed_packet is set to %s. You may want to raise this to about twice the maximum of the test case size and output (storage) limit (currently %s).\n", Utils::printsize((int)$vars['max_allowed_packet']), Utils::printsize($max_inout));
         } elseif ($vars['max_allowed_packet'] < $recommended_max_allowed_packet) {
             $result = 'W';
-            $desc .= sprintf("MySQL's max_allowed_packet is set to %s. You may want to raise this to about twice the maximum test case size (currently %s).\n", Utils::printsize((int)$vars['max_allowed_packet']), Utils::printsize($max_inout));
+            $desc .= sprintf("MySQL's max_allowed_packet is set to %s. We recommend at least 16MB.\n", Utils::printsize((int)$vars['max_allowed_packet']));
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'MySQL settings',
                 'result' => $result,
                 'desc' => $desc ?: 'MySQL settings are all ok'];
     }
 
-    public function checkAdminPass()
+    public function checkAdminPass(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $res = 'O';
         $desc = 'Password for "admin" has been changed from the default.';
 
@@ -263,13 +272,15 @@ class CheckConfigService
             $desc = 'The "admin" user still has the default password. You should change it immediately.';
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Non-default admin password',
                 'result' => $res,
                 'desc' => $desc];
     }
 
-    public function checkDefaultCompareRunExist()
+    public function checkDefaultCompareRunExist(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $res = 'O';
         $desc = '';
 
@@ -284,19 +295,22 @@ class CheckConfigService
             }
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Default compare and run scripts exist',
                 'result' => $res,
                 'desc' => $desc];
     }
 
-    public function checkScriptFilesizevsMemoryLimit()
+    public function checkScriptFilesizevsMemoryLimit(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         if ($this->config->get('script_filesize_limit') <=
             $this->config->get('memory_limit')) {
              $result = 'W';
         } else {
              $result = 'O';
         }
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Compile file size vs. memory limit',
                 'result' => $result,
                 'desc' => 'If the script filesize limit is lower than the memory limit, then ' .
@@ -307,28 +321,34 @@ class CheckConfigService
             ];
     }
 
-    public function checkDebugDisabled()
+    public function checkDebugDisabled(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         if ($this->debug) {
+            $this->stopwatch->stop(__FUNCTION__);
             return ['caption' => 'Debugging',
                 'result' => 'W',
                 'desc' => "Debugging enabled.\nShould not be enabled on live systems."];
         }
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Debugging',
                 'result' => 'O',
                 'desc' => 'Debugging disabled.'];
     }
 
-    public function checkTmpdirWritable()
+    public function checkTmpdirWritable(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $tmpdir = $this->dj->getDomjudgeTmpDir();
         if (is_writable($tmpdir)) {
+            $this->stopwatch->stop(__FUNCTION__);
             return ['caption' => 'TMPDIR writable',
                     'result' => 'O',
                     'desc' => sprintf('TMPDIR (%s) can be used to store temporary ' .
                          'files for submission diffs and edits.',
                          $tmpdir)];
         }
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'TMPDIR writable',
                 'result' => 'W',
                 'desc' => sprintf('TMPDIR (%s) is not writable by the webserver; ' .
@@ -336,27 +356,73 @@ class CheckConfigService
                  $tmpdir)];
     }
 
-
-    public function checkContestActive()
+    private function randomString(int $length): string
     {
+        $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        $charactersLength = strlen($characters);
+        $randomString = '';
+        for ($i = 0; $i < $length; $i++) {
+            $randomString .= $characters[random_int(0, $charactersLength - 1)];
+        }
+        return $randomString;
+    }
+
+    public function checkHashTime(): array
+    {
+        $this->stopwatch->start(__FUNCTION__);
+        $tmp_user = new User();
+        $counter = 0;
+        $time_duration_sample = 2;
+        $time_start = microtime(true);
+        do {
+            $plainPassword = $this->randomString(12);
+            $this->passwordHasher->hashPassword($tmp_user, $plainPassword);
+            $time_end = microtime(true);
+            $counter++;
+        } while (($time_end - $time_start) < $time_duration_sample);
+
+        if ($counter>300) {
+            $this->stopwatch->stop(__FUNCTION__);
+            return ['caption' => 'User password hashing',
+                'result' => 'W',
+                'desc' => sprintf('Hashing is too simple for small sized contests (Did %d hashes).', $counter)];
+        }
+        if ($counter<100) {
+            $this->stopwatch->stop(__FUNCTION__);
+            return ['caption' => 'User password hashing',
+                'result' => 'W',
+                'desc' => sprintf('Hashing is too expensive for medium sized contests (%d done).', $counter)];
+        }
+        $this->stopwatch->stop(__FUNCTION__);
+        return ['caption' => 'User password hashing',
+            'result' => 'O',
+            'desc' => sprintf('Hashing cost is reasonable (Did %d hashes).', $counter)];
+    }
+
+    public function checkContestActive(): array
+    {
+        $this->stopwatch->start(__FUNCTION__);
         $contests = $this->dj->getCurrentContests();
         if (empty($contests)) {
+            $this->stopwatch->stop(__FUNCTION__);
             return ['caption' => 'Active contests',
                     'result' => 'E',
                     'desc' => 'No currently active contests found. System will not function.'];
         }
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Active contests',
                 'result' => 'O',
                 'desc' => 'Currently active contests: ' .
-                    implode(', ', array_map(function ($contest) {
-                        return 'c'.$contest->getCid() . ' (' . $contest->getShortname() . ')';
-                    }, $contests))];
+                    implode(', ', array_map(
+                        fn($contest) => 'c' . $contest->getCid() . ' (' . $contest->getShortname() . ')',
+                        $contests
+                    ))];
     }
 
-
-    public function checkContestsValidate()
+    public function checkContestsValidate(): array
     {
-        // Fetch all active and future contests
+        $this->stopwatch->start(__FUNCTION__);
+        // Fetch all active and future contests.
         $contests = $this->dj->getCurrentContests(null, true);
 
         $contesterrors = $cperrors = [];
@@ -372,7 +438,7 @@ class CheckConfigService
             $cperrors[$cid] = '';
             foreach ($contest->getProblems() as $cp) {
                 if (empty($cp->getColor())) {
-                    $result = ($result == 'E' ? 'E' : 'W');
+                    $result = ($result === 'E' ? 'E' : 'W');
                     $cperrors[$cid] .= "No color for problem " . $cp->getShortname() . " in contest c" . $cid . "\n";
                 }
             }
@@ -384,20 +450,59 @@ class CheckConfigService
                     (count($errors) == 0 ? 'no errors' : (string)$errors) ."\n" .$cperrors[$cid];
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Contests validation',
             'result' => $result,
             'desc' => "Validated all active and future contests:\n\n" .
                     ($desc ?: 'No problems found.')];
     }
 
-
-    public function checkProblemsValidate()
+    public function checkContestBanners(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
+        // Fetch all active and future contests.
+        $contests = $this->dj->getCurrentContests(null, true);
+
+        $desc = '';
+        $result = 'O';
+        foreach ($contests as $contest) {
+            if ($cid = $contest->getApiId($this->eventLogService)) {
+                $bannerpath = $this->dj->assetPath($cid, 'contest', true);
+                $contestName = 'c' . $contest->getCid() . ' (' . $contest->getShortname() . ')';
+                if ($bannerpath) {
+                    if (($filesize = filesize($bannerpath)) > 2 * 1024 * 1024) {
+                        $result = 'W';
+                        $desc .= sprintf("Banner for %s bigger than 2mb (size is %.2fMb)\n", $contestName, $filesize / 1024 / 1024);
+                    } else {
+                        [$width, $height, $ratio] = Utils::getImageSize($bannerpath);
+                        if (mime_content_type($bannerpath) !== 'image/svg+xml' && $width > 1920) {
+                            $result = 'W';
+                            $desc .= sprintf("Banner for %s is wider than 1920\n", $contestName);
+                        } elseif ($ratio < 3 || $ratio > 6) {
+                            $result = 'W';
+                            $desc .= sprintf("Banner for %s is has a ratio of 1:%.2f, between 1:3 and 1:6 recommended\n", $contestName, $ratio);
+                        }
+                    }
+                }
+            }
+        }
+
+        $desc = $desc ?: 'Everything OK';
+
+        $this->stopwatch->stop(__FUNCTION__);
+        return ['caption' => 'Contest banners',
+                'result' => $result,
+                'desc' => $desc];
+    }
+
+    public function checkProblemsValidate(): array
+    {
+        $this->stopwatch->start(__FUNCTION__);
         $problems = $this->em->getRepository(Problem::class)->findAll();
         $script_filesize_limit = $this->config->get('script_filesize_limit');
         $output_limit = $this->config->get('output_limit');
 
-        $problemerrors = $scripterrors = [];
+        $problemerrors = $moreproblemerrors = [];
         $result = 'O';
         foreach ($problems as $problem) {
             $probid = $problem->getProbid();
@@ -408,21 +513,21 @@ class CheckConfigService
             $problemerrors[$probid] = $errors;
 
             $moreproblemerrors[$probid] = '';
-            if ($special_compare = $problem->getSpecialCompare()) {
-                $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $special_compare]);
+            if ($special_compare = $problem->getCompareExecutable()) {
+                $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $special_compare->getExecid()]);
                 if (!$exec) {
                     $result = 'E';
-                    $moreproblemerrors[$probid] .= sprintf("Special compare script %s not found for p%s\n", $special_compare, $probid);
+                    $moreproblemerrors[$probid] .= sprintf("Special compare script %s not found for p%s\n", $special_compare->getExecid(), $probid);
                 } elseif ($exec->getType() !== "compare") {
                     $result = 'E';
                     $moreproblemerrors[$probid] .= sprintf("Special compare script %s exists but is of wrong type (%s instead of compare) for p%s\n", $special_compare, $exec->getType(), $probid);
                 }
             }
-            if ($special_run = $problem->getSpecialRun()) {
-                $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $special_run]);
+            if ($special_run = $problem->getRunExecutable()) {
+                $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $special_run->getExecid()]);
                 if (!$exec) {
                     $result = 'E';
-                    $moreproblemerrors[$probid] .= sprintf("Special run script %s not found for p%s\n", $special_run, $probid);
+                    $moreproblemerrors[$probid] .= sprintf("Special run script %s not found for p%s\n", $special_run->getExecid(), $probid);
                 } elseif ($exec->getType() !== "run") {
                     $result = 'E';
                     $moreproblemerrors[$probid] .= sprintf("Special run script %s exists but is of wrong type (%s instead of run) for p%s\n", $special_run, $exec->getType(), $probid);
@@ -436,11 +541,11 @@ class CheckConfigService
             }
 
             $tcs_size = $this->em->createQueryBuilder()
-                ->select('tc.testcaseid', 'tc.rank', 'length(tcc.output) as output_size' )
+                ->select('tc.testcaseid', 'tc.ranknumber', 'length(tcc.output) as output_size' )
                 ->from(Testcase::class, 'tc')
                 ->join('tc.content', 'tcc')
-                ->andWhere('tc.probid = :probid')
-                ->setParameter(':probid', $probid)
+                ->andWhere('tc.problem = :probid')
+                ->setParameter('probid', $probid)
                 ->getQuery()
                 ->getResult();
             if (count($tcs_size) === 0) {
@@ -471,17 +576,19 @@ class CheckConfigService
             }
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Problems validation',
             'result' => $result,
             'desc' => "Validated all problems:\n\n" .
                     ($desc ?: 'No problems with problems found.')];
     }
 
-    public function checkLanguagesValidate()
+    public function checkLanguagesValidate(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $languages = $this->em->getRepository(Language::class)->findAll();
 
-        $languageerrors = $scripterrors = [];
+        $languageerrors = $morelanguageerrors = [];
         $result = 'O';
         foreach ($languages as $language) {
             $langid = $language->getLangid();
@@ -492,15 +599,19 @@ class CheckConfigService
             $languageerrors[$langid] = $errors;
 
             $morelanguageerrors[$langid] = '';
-            if ($compile = $language->getCompileScript()) {
-               $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $compile]);
-               if (!$exec) {
-                   $result = 'E';
-                   $morelanguageerrors[$langid] .= sprintf("Compile script %s not found for %s\n", $compile, $langid);
-               } elseif ($exec->getType() !== "compile") {
-                   $result = 'E';
-                   $morelanguageerrors[$langid] .= sprintf("Compile script %s exists but is of wrong type (%s instead of compile) for %s\n", $compile, $exec->getType(), $langid);
-               }
+            $compileExecutable = $language->getCompileExecutable();
+            if (null === $compileExecutable) {
+                $result = 'E';
+                $morelanguageerrors[$langid] .= sprintf("No compile script found for %s\n", $langid);
+            } elseif ($compile = $language->getCompileExecutable()->getExecid()) {
+                $exec = $this->em->getRepository(Executable::class)->findOneBy(['execid' => $compile]);
+                if (!$exec) {
+                    $result = 'E';
+                    $morelanguageerrors[$langid] .= sprintf("Compile script %s not found for %s\n", $compile, $langid);
+                } elseif ($exec->getType() !== "compile") {
+                    $result = 'E';
+                    $morelanguageerrors[$langid] .= sprintf("Compile script %s exists but is of wrong type (%s instead of compile) for %s\n", $compile, $exec->getType(), $langid);
+                }
             }
         }
 
@@ -515,121 +626,99 @@ class CheckConfigService
             }
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Languages validation',
             'result' => $result,
             'desc' => "Validated all languages:\n\n" .
                     ($desc ?: 'No languages with problems found.')];
     }
 
-    public function checkProblemLanguageJudgability()
+    public function checkTeamPhotos(): array
     {
-        $judgehosts = $this->em->getRepository(Judgehost::class)->findBy(['active' => 1]);
-
-        foreach ($judgehosts as $judgehost) {
-            if ($judgehost->getRestrictionid() === null) {
-                return ['caption' => 'Problem, language and contest judgability',
-                    'result' => 'O',
-                    'desc' => sprintf("At least one judgehost (%s) is active and unrestricted.", $judgehost->getHostname())];
-            }
-        }
-
-        $languages = $this->em->getRepository(Language::class)->findAll();
-        $contests = $this->dj->getCurrentContests(null, true);
+        $this->stopwatch->start(__FUNCTION__);
+        /** @var Team[] $teams */
+        $teams = $this->em->getRepository(Team::class)->findAll();
 
         $desc = '';
         $result = 'O';
-        foreach ($contests as $contest) {
-            foreach ($contest->getProblems() as $cp ) {
-                foreach ($languages as $lang) {
-                    if (!$lang->getAllowSubmit()) {
-                        continue;
-                    }
-                    $found1 = false;
-                    foreach ($judgehosts as $judgehost) {
-                        $rest = $judgehost->getRestriction();
-                        $rest_c = $rest->getContests();
-                        $rest_p = $rest->getProblems();
-                        $rest_l = $rest->getLanguages();
-                        if ((empty($rest_c) || in_array($contest->getCid(), $rest_c)) &&
-                            (empty($rest_p) || in_array($cp->getProbid(), $rest_p)) &&
-                            (empty($rest_l) || in_array($lang->getLangid(), $rest_l))) {
-                            $found1 = true;
-                            continue;
-                        }
-                    }
-                    if (!$found1) {
-                        $result = 'E';
-                        $desc .= sprintf("No active judgehost that allows combination c%s-p%s-%s\n",
-                            $contest->getCid(), $cp->getProbid(), $lang->getLangid());
-                    }
+        foreach ($teams as $team) {
+            if ($tid = $team->getApiId($this->eventLogService)) {
+                $photopath = $this->dj->assetPath($tid, 'team', true);
+                if ($photopath && ($filesize = filesize($photopath)) > 5 * 1024 * 1024) {
+                    $result = 'W';
+                    $desc .= sprintf("Photo for t%d (%s) bigger than 5mb (size is %.2fMb)\n", $team->getTeamid(), $team->getName(), $filesize / 1024 / 1024);
                 }
             }
         }
-        $desc = $desc ?: 'Found at least one judgehost for each combination of current/future contest, associated problem, enabled language';
 
-        return ['caption' => 'Problem, language and contest judgability',
-            'result' => $result,
-            'desc' => $desc];
+        $desc = $desc ?: 'Everything OK';
+
+        $this->stopwatch->stop(__FUNCTION__);
+        return ['caption' => 'Team photos',
+                'result' => $result,
+                'desc' => $desc];
     }
 
-    public function checkAffiliations()
+    public function checkAffiliations(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $show_logos = $this->config->get('show_affiliation_logos');
-        $show_flags = $this->config->get('show_flags');
 
-        if (!$show_logos && !$show_flags) {
+        if (!$show_logos) {
+            $this->stopwatch->stop(__FUNCTION__);
             return ['caption' => 'Team affiliations',
                 'result' => 'O',
                 'desc' => 'Affiliations display disabled, skipping checks'];
         }
 
+        /** @var TeamAffiliation[] $affils */
         $affils = $this->em->getRepository(TeamAffiliation::class)->findAll();
 
         $result = 'O';
         $desc = '';
-        $webDir = sprintf('%s/public/', $this->dj->getDomjudgeWebappDir());
         foreach ($affils as $affiliation) {
-            // don't care about unused affiliations
+            // Only check affiliations that are used, i.e. where there is at least one team.
             if (count($affiliation->getTeams()) === 0) {
                 continue;
             }
-            if ($show_flags) {
-                if ($countryCode = $affiliation->getCountry()) {
-                    $flagpath = $webDir . sprintf('images/countries/%s.png', $countryCode);
-                    if (!file_exists($flagpath)) {
+
+            if ($aid = $affiliation->getApiId($this->eventLogService)) {
+                $logopath = $this->dj->assetPath($aid, 'affiliation', true);
+                $logopathMask = str_replace('.jpg', '.{jpg,png,svg}', $this->dj->assetPath($aid, 'affiliation', true, 'jpg'));
+                if (!$logopath) {
+                    $result = 'W';
+                    $desc   .= sprintf("Logo for %s does not exist (looking for %s)\n", $affiliation->getShortname(), $logopathMask);
+                } elseif (!is_readable($logopath)) {
+                    $result = 'W';
+                    $desc .= sprintf("Logo for %s not readable (looking for %s)\n", $affiliation->getShortname(), $logopathMask);
+                } elseif (($filesize = filesize($logopath)) > 500 * 1024) {
+                    $result = 'W';
+                    $desc .= sprintf("Logo for %s bigger than 500Kb (size is %.2fKb)\n", $affiliation->getShortname(), $filesize / 1024);
+                } else {
+                    [$width, $height, $ratio] = Utils::getImageSize($logopath);
+                    if (mime_content_type($logopath) === 'image/svg+xml') {
+                        // For SVG's we check the ratio
                         $result = 'W';
-                        $desc .= sprintf("Flag for %s does not exist (looking for %s)\n", $countryCode, $flagpath);
-                    } elseif (!is_readable($flagpath)) {
-                         $result = 'W';
-                         $desc .= sprintf("Flag for %s not readable (looking for %s)\n", $countryCode, $flagpath);
-                    }
-                }
-            }
-            if ($show_logos) {
-                if ($aid = $affiliation->getAffilid()) {
-                    $logopath = $webDir . sprintf('images/affiliations/%s.png', $aid);
-                    if ($this->eventLogService->externalIdFieldForEntity($affiliation)) {
-                        $logopath = $webDir . sprintf('images/affiliations/%s.png', $affiliation->getExternalid());
-                    }
-                    if (!file_exists($logopath)) {
+                        $desc   .= sprintf("Logo for %s has a ratio of 1:%.2f, should be 1:1\n", $affiliation->getShortname(), $ratio);
+                    } elseif ($width !== 64 || $height !== 64) {
+                        // For other images we check the size
                         $result = 'W';
-                        $desc   .= sprintf("Logo for %s does not exist (looking for %s)\n", $affiliation->getShortname(), $logopath);
-                    } elseif (!is_readable($logopath)) {
-                        $result = 'W';
-                        $desc   .= sprintf("Logo for %s not readable (looking for %s)\n", $affiliation->getShortname(), $logopath);
+                        $desc   .= sprintf("Logo for %s is not 64x64\n", $affiliation->getShortname());
                     }
                 }
             }
         }
         $desc = $desc ?: 'Everything OK';
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Team affiliations',
             'result' => $result,
             'desc' => $desc];
     }
 
-    public function checkTeamDuplicateNames()
+    public function checkTeamDuplicateNames(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $teams = $this->em->getRepository(Team::class)->findAll();
 
         $result = 'O';
@@ -642,18 +731,20 @@ class CheckConfigService
             if (count($teams) > 1) {
                 $result = 'W';
                 $desc .= sprintf("Team name '%s' in use by multiple teams: %s",
-                         $teamname, implode(',', $teams));
+                         $teamname, implode(',', $teams) . "\n");
             }
         }
         $desc = $desc ?: 'Every team name is unique';
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Team name uniqueness',
             'result' => $result,
             'desc' => $desc];
     }
 
-    public function checkSelfRegistration()
+    public function checkSelfRegistration(): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $result = 'O';
         $desc = '';
 
@@ -670,20 +761,22 @@ class CheckConfigService
                     $selfRegistrationCategories[0]->getName());
             } else {
                 $desc .= sprintf("Team categories allowed for self-registered teams: %s.\n",
-                    implode(', ', array_map(function($category) {
+                    implode(', ', array_map(function ($category) {
                         return $category->getName();
                     }, $selfRegistrationCategories)));
             }
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return ['caption' => 'Self-registration',
             'result' => $result,
             'desc' => $desc];
     }
 
-    public function checkAllExternalIdentifiers()
+    public function checkAllExternalIdentifiers(): array
     {
-        // Get all entity classes
+        $this->stopwatch->start(__FUNCTION__);
+        // Get all entity classes.
         $dir   = realpath(sprintf('%s/src/Entity', $this->dj->getDomjudgeWebappDir()));
         $files = glob($dir . '/*.php');
 
@@ -694,23 +787,24 @@ class CheckConfigService
             $shortClass = str_replace('.php', '', $parts[count($parts) - 1]);
             $class      = sprintf('App\\Entity\\%s', $shortClass);
             try {
-                if (class_exists($class) && !in_array($class, [
-                        // Contestproblem is checked using Problem
-                        ContestProblem::class,
-                    ]) && ($externalIdField = $this->eventLogService->externalIdFieldForEntity($class))) {
-
+                if (class_exists($class)
+                    // ContestProblem is checked using Problem.
+                    && $class != ContestProblem::class
+                    && ($externalIdField = $this->eventLogService->externalIdFieldForEntity($class))) {
                     $result[$shortClass] = $this->checkExternalIdentifiers($class, $externalIdField);
                 }
-            } catch (\BadMethodCallException $e) {
-                // Ignore, this entity does not have an API endpoint
+            } catch (BadMethodCallException $e) {
+                // Ignore, this entity does not have an API endpoint.
             }
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return $result;
     }
 
-    protected function checkExternalIdentifiers($class, $externalIdField)
+    protected function checkExternalIdentifiers(string $class, string $externalIdField): array
     {
+        $this->stopwatch->start(__FUNCTION__);
         $parts      = explode('\\', $class);
         $entityType = $parts[count($parts) - 1];
         $result     = 'O';
@@ -719,25 +813,27 @@ class CheckConfigService
             ->from($class, 'e')
             ->select('e')
             ->andWhere(sprintf('e.%s IS NULL or e.%s = :empty', $externalIdField, $externalIdField))
-            ->setParameter(':empty', '')
+            ->setParameter('empty', '')
             ->getQuery()
             ->getResult();
+
+        $inflector = InflectorFactory::create()->build();
 
         if (!empty($rowsWithoutExternalId)) {
             $result      = 'E';
             $description = '';
             $metadata    = $this->em->getClassMetadata($class);
             foreach ($rowsWithoutExternalId as $entity) {
-                $route       = sprintf('jury_%s', Inflector::tableize($entityType));
+                $route       = sprintf('jury_%s', $inflector->tableize($entityType));
                 $routeParams = [];
                 foreach ($metadata->getIdentifierColumnNames() as $column) {
-                    // By default the ID param is the same as the column but then with Id instead of id
+                    // By default, the ID param is the same as the column but then with Id instead of id.
                     $param = str_replace('id', 'Id', $column);
                     if ($param === 'cId') {
-                        // For contests we use contestId instead of cId
+                        // For contests we use contestId instead of cId.
                         $param = 'contestId';
                     } elseif ($param === 'clarId') {
-                        // For clarifications it is id instead of clarId
+                        // For clarifications it is id instead of clarId.
                         $param = 'id';
                     }
                     $getter              = sprintf('get%s', ucfirst($column));
@@ -745,19 +841,25 @@ class CheckConfigService
                 }
                 $description .= sprintf("<a href=\"%s\">%s %s</a> does not have an external ID\n",
                                         $this->router->generate($route, $routeParams),
-                                        ucfirst(str_replace('_', ' ', Inflector::tableize($entityType))),
-                                        implode(', ', $metadata->getIdentifierValues($entity))
+                                        ucfirst(str_replace('_', ' ', $inflector->tableize($entityType))),
+                                        Utils::specialchars(implode(', ', $metadata->getIdentifierValues($entity)))
                 );
             }
         } else {
             $description = 'All entities OK';
         }
 
+        $this->stopwatch->stop(__FUNCTION__);
         return [
-            'caption' => ucfirst(Inflector::pluralize(str_replace('_', ' ', Inflector::tableize($entityType)))),
+            'caption' => ucfirst($inflector->pluralize(str_replace('_', ' ', $inflector->tableize($entityType)))),
             'result' => $result,
             'desc' => $description,
             'escape' => false,
         ];
+    }
+
+    public function getStopwatch(): Stopwatch
+    {
+        return $this->stopwatch;
     }
 }

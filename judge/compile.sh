@@ -42,7 +42,7 @@ cleanexit ()
 {
 	trap - EXIT
 
-	chmod go= "$WORKDIR/compile"
+	chmod go= "$WORKDIR/compile" "$WORKDIR/compile-script"
 	logmsg $LOG_DEBUG "exiting, code = '$1'"
 	exit $1
 }
@@ -121,6 +121,11 @@ chmod a+rwx "$WORKDIR/compile"
 # Create files which are expected to exist: compiler output and runtime
 touch compile.out compile.meta
 
+# Copy compile script into chroot
+# shellcheck disable=SC2174
+mkdir -m 0777 -p "$WORKDIR/compile-script"
+cp -a "$(dirname "$COMPILE_SCRIPT")"/* "$WORKDIR/compile-script/"
+
 cd "$WORKDIR/compile"
 
 for src in "$@" ; do
@@ -132,6 +137,7 @@ done
 
 logmsg $LOG_INFO "starting compile"
 
+# shellcheck disable=SC2236
 if [ ! -z "$ENTRY_POINT" ]; then
 	ENVIRONMENT_VARS="-V ENTRY_POINT=$ENTRY_POINT"
 fi
@@ -143,9 +149,10 @@ fi
 # the compiler writing to different filenames and deleting intermediate files.
 exitcode=0
 $GAINROOT "$RUNGUARD" ${DEBUG:+-v} $CPUSET_OPT -u "$RUNUSER" -g "$RUNGROUP" \
+	-r "$PWD/.." -d "/compile" \
 	-m $SCRIPTMEMLIMIT -t $SCRIPTTIMELIMIT -c -f $SCRIPTFILELIMIT -s $SCRIPTFILELIMIT \
 	-M "$WORKDIR/compile.meta" $ENVIRONMENT_VARS -- \
-	"$COMPILE_SCRIPT" program "$MEMLIMIT" "$@" >"$WORKDIR/compile.tmp" 2>&1 || \
+	"/compile-script/$(basename "$COMPILE_SCRIPT")" program "$MEMLIMIT" "$@" >"$WORKDIR/compile.tmp" 2>&1 || \
 	exitcode=$?
 
 # Make sure that all files are owned by the current user/group, so
@@ -174,7 +181,8 @@ fi
 
 # Check if the compile script auto-detected the entry point, and if
 # so, store it in the compile.meta for later reuse, e.g. in a replay.
-grep '[Dd]etected entry_point: ' compile.tmp | sed 's/^.*etected //' >>compile.meta
+ENTRY_POINT_REGEX='[Dd]etected entry_point: '
+grep "$ENTRY_POINT_REGEX" compile.tmp | sed 's/^.*etected //' >>compile.meta
 
 logmsg $LOG_DEBUG "checking compilation exit-status"
 if grep '^time-result: .*timelimit' compile.meta >/dev/null 2>&1 ; then
@@ -192,7 +200,11 @@ if [ ! -f compile/program ] || [ ! -x compile/program ]; then
 	cat compile.tmp >>compile.out
 	cleanexit ${E_COMPILER_ERROR:-1}
 fi
-cat compile.tmp >>compile.out
+
+# Remove any entry point detection message when compilation succeeded,
+# since we already stored it above and it only confuses contestants.
+# Ignore the exit code, since grep returns 1 when no line matched.
+grep -v "$ENTRY_POINT_REGEX" compile.tmp >>compile.out || true
 
 logmsg $LOG_INFO "Compilation successful"
 cleanexit 0

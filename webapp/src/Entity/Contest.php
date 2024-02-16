@@ -6,24 +6,29 @@ use App\Utils\FreezeData;
 use App\Utils\Utils;
 use App\Validator\Constraints\Identifier;
 use App\Validator\Constraints\TimeString;
+use DateTime;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
+use Exception;
 use JMS\Serializer\Annotation as Serializer;
+use OpenApi\Annotations as OA;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 /**
- * Contests that will be run with this install
+ * Contests that will be run with this install.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="contest",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Contests that will be run with this install"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Contests that will be run with this install"},
  *     indexes={@ORM\Index(name="cid", columns={"cid", "enabled"})},
  *     uniqueConstraints={
- *         @ORM\UniqueConstraint(name="externalid", columns={"externalid"}, options={"lengths": {"190"}}),
- *         @ORM\UniqueConstraint(name="shortname", columns={"shortname"}, options={"lengths": {"190"}})
+ *         @ORM\UniqueConstraint(name="externalid", columns={"externalid"}, options={"lengths": {190}}),
+ *         @ORM\UniqueConstraint(name="shortname", columns={"shortname"}, options={"lengths": {190}})
  *     }
  * )
  * @Serializer\VirtualProperty(
@@ -40,49 +45,44 @@ use Symfony\Component\Validator\Context\ExecutionContextInterface;
  * @UniqueEntity("shortname")
  * @UniqueEntity("externalid")
  */
-class Contest extends BaseApiEntity
+class Contest extends BaseApiEntity implements AssetEntityInterface
 {
     const STARTTIME_UPDATE_MIN_SECONDS_BEFORE = 30;
 
     /**
-     * @var int
-     *
      * @ORM\Id
      * @ORM\GeneratedValue(strategy="AUTO")
      * @ORM\Column(type="integer", name="cid", options={"comment"="Contest ID", "unsigned"=true}, nullable=false, length=4)
      * @Serializer\SerializedName("id")
      * @Serializer\Type("string")
      */
-    protected $cid;
+    protected ?int $cid = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="externalid", length=255, options={"comment"="Contest ID in an external system",
-     *                            "collation"="utf8mb4_bin", "default"="NULL"}, nullable=true)
+     *                            "collation"="utf8mb4_bin"}, nullable=true)
      * @Serializer\Groups({"Nonstrict"})
      * @Serializer\SerializedName("external_id")
      */
-    protected $externalid;
+    protected ?string $externalid = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="name", length=255, options={"comment"="Descriptive name"}, nullable=false)
      * @Assert\NotBlank()
      */
-    private $name;
+    private string $name = '';
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="shortname", length=255, options={"comment"="Short name for this contest"},
      *                            nullable=false)
      * @Serializer\Groups({"Nonstrict"})
      * @Identifier()
      * @Assert\NotBlank()
      */
-    private $shortname;
+    private string $shortname = '';
 
     /**
-     * @var double
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="activatetime",
      *     options={"comment"="Time contest becomes visible in team/public views",
      *              "unsigned"=true},
@@ -92,7 +92,7 @@ class Contest extends BaseApiEntity
     private $activatetime;
 
     /**
-     * @var double
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="starttime",
      *     options={"comment"="Time contest starts, submissions accepted",
      *              "unsigned"=true},
@@ -102,25 +102,24 @@ class Contest extends BaseApiEntity
     private $starttime;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="starttime_enabled",
      *     options={"comment"="If disabled, starttime is not used, e.g. to delay contest start","default"=1},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $starttimeEnabled = true;
+    private bool $starttimeEnabled = true;
 
     /**
-     * @var double
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="freezetime",
-     *     options={"comment"="Time scoreboard is frozen","unsigned"=true,"default"="NULL"},
+     *     options={"comment"="Time scoreboard is frozen","unsigned"=true},
      *     nullable=true)
      * @Serializer\Exclude()
      */
     private $freezetime;
 
     /**
-     * @var double
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="endtime",
      *     options={"comment"="Time after which no more submissions are accepted",
      *              "unsigned"=true},
@@ -130,153 +129,217 @@ class Contest extends BaseApiEntity
     private $endtime;
 
     /**
-     * @var double
+     * @var double|string|null
      * @ORM\Column(type="decimal", precision=32, scale=9, name="unfreezetime",
      *     options={"comment"="Unfreeze a frozen scoreboard at this time",
-     *              "unsigned"=true,"default"="NULL"},
+     *              "unsigned"=true},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $unfreezetime;
+    private $unfreezetime = null;
 
     /**
-     * @var double
+     * @var double|string|null
      * @ORM\Column(type="decimal", precision=32, scale=9, name="finalizetime",
      *     options={"comment"="Time when contest was finalized, null if not yet",
-     *              "unsigned"=true,"default"="NULL"},
+     *              "unsigned"=true},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $finalizetime;
+    private $finalizetime = null;
 
     /**
-     * @var string|null
-     * @ORM\Column(type="text", name="finalizecomment",
-     *     options={"comment"="Comments by the finalizer","default"="NULL"},
+     * @ORM\Column(type="text", name="finalizecomment", length=65535,
+     *     options={"comment"="Comments by the finalizer"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $finalizecomment;
+    private ?string $finalizecomment = null;
 
     /**
-     * @var int|null
      * @ORM\Column(type="smallint", length=3, name="b",
      *     options={"comment"="Number of extra bronze medals","unsigned"="true","default"=0},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $b = 0;
+    private ?int $b = 0;
 
     /**
-     * @var double
+     * @ORM\Column(type="boolean", name="medals_enabled",
+     *     options={"default"=0},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private ?bool $medalsEnabled = false;
+
+    /**
+     * @ORM\ManyToMany(targetEntity="App\Entity\TeamCategory", inversedBy="contests_for_medals")
+     * @ORM\JoinTable(name="contestteamcategoryformedals",
+     *                joinColumns={@ORM\JoinColumn(name="cid", referencedColumnName="cid", onDelete="CASCADE")},
+     *                inverseJoinColumns={@ORM\JoinColumn(name="categoryid", referencedColumnName="categoryid", onDelete="CASCADE")}
+     *               )
+     * @Serializer\Exclude()
+     */
+    private Collection $medal_categories;
+
+    /**
+     * @ORM\Column(type="smallint", length=3, name="gold_medals",
+     *     options={"comment"="Number of gold medals","unsigned"="true","default"=4},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private int $goldMedals = 4;
+
+    /**
+     * @ORM\Column(type="smallint", length=3, name="silver_medals",
+     *     options={"comment"="Number of silver medals","unsigned"="true","default"=4},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private int $silverMedals = 4;
+
+    /**
+     * @ORM\Column(type="smallint", length=3, name="bronze_medals",
+     *     options={"comment"="Number of bronze medals","unsigned"="true","default"=4},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private int $bronzeMedals = 4;
+
+    /**
+     * @var double|string
      * @ORM\Column(type="decimal", precision=32, scale=9, name="deactivatetime",
      *     options={"comment"="Time contest becomes invisible in team/public views",
-     *              "unsigned"=true,"default"="NULL"},
+     *              "unsigned"=true},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $deactivatetime;
+    private $deactivatetime = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="activatetime_string",
      *     options={"comment"="Authoritative absolute or relative string representation of activatetime"},
      *     nullable=false)
      * @Serializer\Exclude()
      * @TimeString(relativeIsPositive=false)
      */
-    private $activatetimeString;
+    private string $activatetimeString = '';
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="starttime_string",
      *     options={"comment"="Authoritative absolute (only!) string representation of starttime"},
      *     nullable=false)
      * @Serializer\Exclude()
      * @TimeString(allowRelative=false)
      */
-    private $starttimeString;
+    private string $starttimeString = '';
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="freezetime_string",
-     *     options={"comment"="Authoritative absolute or relative string representation of freezetime",
-     *              "default"="NULL"},
+     *     options={"comment"="Authoritative absolute or relative string representation of freezetime"},
      *     nullable=true)
      * @Serializer\Exclude()
      * @TimeString()
      */
-    private $freezetimeString;
+    private ?string $freezetimeString = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="endtime_string",
      *     options={"comment"="Authoritative absolute or relative string representation of endtime"},
      *     nullable=false)
      * @Serializer\Exclude()
      * @TimeString()
      */
-    private $endtimeString;
+    private string $endtimeString = '';
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="unfreezetime_string",
-     *     options={"comment"="Authoritative absolute or relative string representation of unfreezetime",
-     *              "default"="NULL"},
+     *     options={"comment"="Authoritative absolute or relative string representation of unfreezetime"},
      *     nullable=true)
      * @Serializer\Exclude()
      * @TimeString()
      */
-    private $unfreezetimeString;
+    private ?string $unfreezetimeString = null;
 
     /**
-     * @var string
      * @ORM\Column(type="string", length=64, name="deactivatetime_string",
-     *     options={"comment"="Authoritative absolute or relative string representation of deactivatetime",
-     *              "default"="NULL"},
+     *     options={"comment"="Authoritative absolute or relative string representation of deactivatetime"},
      *     nullable=true)
      * @Serializer\Exclude()
      * @TimeString()
      */
-    private $deactivatetimeString;
+    private ?string $deactivatetimeString = null;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="enabled",
      *     options={"comment"="Whether this contest can be active","default"=1},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $enabled = true;
+    private bool $enabled = true;
 
     /**
-     * @var boolean
+     * @ORM\Column(type="boolean", name="allow_submit",
+     *     options={"comment"="Are submissions accepted in this contest?","default"="1"},
+     *     nullable=false)
+     * @Serializer\Groups({"Nonstrict"})
+     */
+    private bool $allowSubmit = true;
+
+    /**
      * @ORM\Column(type="boolean", name="process_balloons",
      *     options={"comment"="Will balloons be processed for this contest?","default"=1},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $processBalloons = true;
+    private bool $processBalloons = true;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="public",
      *     options={"comment"="Is this contest visible for the public?",
      *              "default"=1},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $public = true;
+    private bool $public = true;
 
     /**
-     * @var boolean
+     * @Assert\File(mimeTypes={"image/png","image/jpeg","image/svg+xml"}, mimeTypesMessage="Only PNG's, JPG's and SVG's are allowed")
+     * @Serializer\Exclude()
+     */
+    private ?UploadedFile $bannerFile = null;
+
+    /**
+     * @Serializer\Exclude()
+     */
+    private bool $clearBanner = false;
+
+    /**
      * @ORM\Column(type="boolean", name="open_to_all_teams",
      *     options={"comment"="Is this contest open to all teams?",
      *              "default"=1},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $openToAllTeams = true;
+    private bool $openToAllTeams = true;
+
+    /**
+     * @ORM\Column(type="text", length=65535, name="warning_message",
+     *     options={"comment"="Warning message for this contest shown on the scoreboards"},
+     *                          nullable=true)
+     * @Serializer\Groups({"Nonstrict"})
+     * @OA\Property(nullable=true)
+     */
+    private ?string $warningMessage = null;
+
+    /**
+     * @ORM\Column(type="boolean", name="is_locked",
+     *     options={"comment"="Is this contest locked for modifications?",
+     *              "default"=0},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private bool $isLocked = false;
 
     /**
      * @ORM\ManyToMany(targetEntity="Team", inversedBy="contests")
@@ -286,7 +349,7 @@ class Contest extends BaseApiEntity
      *               )
      * @Serializer\Exclude()
      */
-    private $teams;
+    private Collection $teams;
 
     /**
      * @ORM\ManyToMany(targetEntity="App\Entity\TeamCategory", inversedBy="contests")
@@ -296,19 +359,19 @@ class Contest extends BaseApiEntity
      *               )
      * @Serializer\Exclude()
      */
-    private $team_categories;
+    private Collection $team_categories;
 
     /**
      * @ORM\OneToMany(targetEntity="Clarification", mappedBy="contest")
      * @Serializer\Exclude()
      */
-    private $clarifications;
+    private Collection $clarifications;
 
     /**
      * @ORM\OneToMany(targetEntity="Submission", mappedBy="contest")
      * @Serializer\Exclude()
      */
-    private $submissions;
+    private Collection $submissions;
 
     /**
      * @ORM\OneToMany(targetEntity="ContestProblem", mappedBy="contest", orphanRemoval=true, cascade={"persist"})
@@ -316,13 +379,13 @@ class Contest extends BaseApiEntity
      * @Serializer\Exclude()
      * @Assert\Valid()
      */
-    private $problems;
+    private Collection $problems;
 
     /**
      * @ORM\OneToMany(targetEntity="InternalError", mappedBy="contest")
      * @Serializer\Exclude()
      */
-    private $internal_errors;
+    private Collection $internal_errors;
 
     /**
      * @var ArrayCollection
@@ -330,331 +393,196 @@ class Contest extends BaseApiEntity
      * @Serializer\Exclude()
      * @Assert\Valid()
      */
-    private $removedIntervals;
-
+    private Collection $removedIntervals;
 
     /**
-     * Constructor
+     * @var ArrayCollection
+     * @ORM\OneToMany(targetEntity="App\Entity\ExternalContestSource", mappedBy="contest")
+     * @Serializer\Exclude()
+     * @Assert\Valid()
      */
+    private Collection $externalContestSources;
+
     public function __construct()
     {
-        $this->problems         = new ArrayCollection();
-        $this->teams            = new ArrayCollection();
-        $this->removedIntervals = new ArrayCollection();
-        $this->clarifications = new ArrayCollection();
-        $this->submissions = new ArrayCollection();
-        $this->internal_errors = new ArrayCollection();
-        $this->team_categories = new ArrayCollection();
+        $this->problems               = new ArrayCollection();
+        $this->teams                  = new ArrayCollection();
+        $this->removedIntervals       = new ArrayCollection();
+        $this->clarifications         = new ArrayCollection();
+        $this->submissions            = new ArrayCollection();
+        $this->internal_errors        = new ArrayCollection();
+        $this->team_categories        = new ArrayCollection();
+        $this->medal_categories       = new ArrayCollection();
+        $this->externalContestSources = new ArrayCollection();
     }
 
-    /**
-     * Get cid
-     *
-     * @return integer
-     */
-    public function getCid()
+    public function getCid(): ?int
     {
         return $this->cid;
     }
 
-    /**
-     * Set externalid
-     *
-     * @param string $externalid
-     *
-     * @return Contest
-     */
-    public function setExternalid($externalid)
+    public function setExternalid(?string $externalid): Contest
     {
         $this->externalid = $externalid;
-
         return $this;
     }
 
-    /**
-     * Get externalid
-     *
-     * @return string
-     */
-    public function getExternalid()
+    public function getExternalid(): ?string
     {
         return $this->externalid;
     }
 
-    /**
-     * Set name
-     *
-     * @param string $name
-     *
-     * @return Contest
-     */
-    public function setName($name)
+    public function setName(string $name): Contest
     {
         $this->name = $name;
-
         return $this;
     }
 
-    /**
-     * Get name
-     *
-     * @return string
-     */
-    public function getName()
+    public function getName(): string
     {
         return $this->name;
     }
 
-    /**
-     * Set shortname
-     *
-     * @param string $shortname
-     *
-     * @return Contest
-     */
-    public function setShortname($shortname)
+    public function setShortname(string $shortname): Contest
     {
         $this->shortname = $shortname;
-
         return $this;
     }
 
-    /**
-     * Get shortname
-     *
-     * @return string
-     */
-    public function getShortname()
+    public function getShortname(): string
     {
         return $this->shortname;
     }
 
-    /**
-     * Get activatetime
-     *
-     * @return double
-     */
-    public function getActivatetime()
+    public function getShortDescription(): string
     {
-        return $this->activatetime;
+        return $this->getShortname();
     }
 
-    /**
-     * Set starttime
-     *
-     * @param double $starttime
-     *
-     * @return Contest
-     */
-    public function setStarttime($starttime)
+    public function getActivatetime(): ?float
+    {
+        return $this->activatetime === null ? null : (float)$this->activatetime;
+    }
+
+    /** @param string|float $starttime */
+    public function setStarttime($starttime): Contest
     {
         $this->starttime = $starttime;
-
         return $this;
     }
 
     /**
-     * Get starttime, or NULL if disabled
+     * Get starttime, or NULL if disabled.
      *
-     * @param bool $nullWhenDisabled If true, return null if the start time is disabled
-     * @return double
+     * @param bool $nullWhenDisabled If true, return null if the start time is disabled, defaults to true.
      */
-    public function getStarttime(bool $nullWhenDisabled = true)
+    public function getStarttime(bool $nullWhenDisabled = true): ?float
     {
         if ($nullWhenDisabled && !$this->getStarttimeEnabled()) {
             return null;
         }
 
-        return $this->starttime;
+        return $this->starttime === null ? null : (float)$this->starttime;
     }
 
     /**
-     * Get the start time for this contest
-     *
-     * @return \DateTime|null
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("start_time")
      * @Serializer\Type("DateTime")
      */
-    public function getStartTimeObject()
+    public function getStartTimeObject(): ?DateTime
     {
-        return $this->getStarttime() ? new \DateTime(Utils::absTime($this->getStarttime())) : null;
+        return $this->getStarttime() ? new DateTime(Utils::absTime($this->getStarttime())) : null;
     }
 
-    /**
-     * Set starttime_enabled
-     *
-     * @param boolean $starttimeEnabled
-     *
-     * @return Contest
-     */
-    public function setStarttimeEnabled($starttimeEnabled)
+    public function setStarttimeEnabled(bool $starttimeEnabled): Contest
     {
         $this->starttimeEnabled = $starttimeEnabled;
-
         return $this;
     }
 
-    /**
-     * Get starttime_enabled
-     *
-     * @return boolean
-     */
-    public function getStarttimeEnabled()
+    public function getStarttimeEnabled(): bool
     {
         return $this->starttimeEnabled;
     }
 
-    /**
-     * Get freezetime
-     *
-     * @return double
-     */
-    public function getFreezetime()
+    public function getFreezetime(): ?float
     {
-        return $this->freezetime;
+        return $this->freezetime === null ? null : (float)$this->freezetime;
+    }
+
+    public function getEndtime(): ?float
+    {
+        return $this->endtime === null ? null : (float)$this->endtime;
     }
 
     /**
-     * Get endtime
-     *
-     * @return double
-     */
-    public function getEndtime()
-    {
-        return $this->endtime;
-    }
-
-    /**
-     * Get the end time for this contest
-     *
-     * @return \DateTime|null
-     * @throws \Exception
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("end_time")
      * @Serializer\Type("DateTime")
      * @Serializer\Groups({"Nonstrict"})
      */
-    public function getEndTimeObject()
+    public function getEndTimeObject(): ?DateTime
     {
-        return $this->getEndtime() ? new \DateTime(Utils::absTime($this->getEndtime())) : null;
+        return $this->getEndtime() ? new DateTime(Utils::absTime($this->getEndtime())) : null;
     }
 
-    /**
-     * Get unfreezetime
-     *
-     * @return double
-     */
-    public function getUnfreezetime()
+    public function getUnfreezetime(): ?float
     {
-        return $this->unfreezetime;
+        return $this->unfreezetime === null ? null : (float)$this->unfreezetime;
     }
 
-    /**
-     * Get finalizetime
-     *
-     * @return double
-     */
-    public function getFinalizetime()
+    public function getFinalizetime(): ?float
     {
-        return $this->finalizetime;
+        return $this->finalizetime === null ? null : (float)$this->finalizetime;
     }
 
-    /**
-     * Set finalizetime
-     *
-     * @param double $finalizetimeString
-     *
-     * @return Contest
-     */
-    public function setFinalizetime($finalizetimeString)
+    /** @param string|float $finalizetimeString */
+    public function setFinalizetime($finalizetimeString): Contest
     {
         $this->finalizetime = $finalizetimeString;
         return $this;
     }
 
-    /**
-     * Get finalizecomment
-     *
-     * @return string|null
-     */
-    public function getFinalizecomment()
+    public function getFinalizecomment(): ?string
     {
         return $this->finalizecomment;
     }
 
-    /**
-     * Set finalizecomment
-     *
-     * @param string|null $finalizecomment
-     */
-    public function setFinalizecomment($finalizecomment)
+    public function setFinalizecomment(?string $finalizecomment): Contest
     {
         $this->finalizecomment = $finalizecomment;
+        return $this;
     }
 
-    /**
-     * Get b
-     *
-     * @return int|null
-     */
-    public function getB()
+    public function getB(): ?int
     {
         return $this->b;
     }
 
-    /**
-     * Set b
-     * @param int|null $b
-     */
-    public function setB($b)
+    public function setB(?int $b)
     {
         $this->b = $b;
     }
 
-    /**
-     * Get deactivatetime
-     *
-     * @return double
-     */
-    public function getDeactivatetime()
+    public function getDeactivatetime(): ?float
     {
-        return $this->deactivatetime;
+        return $this->deactivatetime === null ? null : (float)$this->deactivatetime;
     }
 
-    /**
-     * Set activatetimeString
-     *
-     * @param string $activatetimeString
-     *
-     * @return Contest
-     */
-    public function setActivatetimeString($activatetimeString)
+    public function setActivatetimeString(?string $activatetimeString): Contest
     {
         $this->activatetimeString = $activatetimeString;
         $this->activatetime       = $this->getAbsoluteTime($activatetimeString);
-
         return $this;
     }
 
-    /**
-     * Get activatetimeString
-     *
-     * @return string
-     */
-    public function getActivatetimeString()
+    public function getActivatetimeString(): ?string
     {
         return $this->activatetimeString;
     }
 
-    /**
-     * Set starttimeString
-     *
-     * @param string $starttimeString
-     *
-     * @return Contest
-     */
-    public function setStarttimeString($starttimeString)
+    public function setStarttimeString(string $starttimeString): Contest
     {
         $this->starttimeString = $starttimeString;
 
@@ -667,266 +595,215 @@ class Contest extends BaseApiEntity
         return $this;
     }
 
-    /**
-     * Get starttimeString
-     *
-     * @return string
-     */
-    public function getStarttimeString()
+    public function getStarttimeString(): string
     {
         return $this->starttimeString;
     }
 
-    /**
-     * Set freezetimeString
-     *
-     * @param string $freezetimeString
-     *
-     * @return Contest
-     */
-    public function setFreezetimeString($freezetimeString)
+    public function setFreezetimeString(?string $freezetimeString): Contest
     {
         $this->freezetimeString = $freezetimeString;
         $this->freezetime       = $this->getAbsoluteTime($freezetimeString);
-
         return $this;
     }
 
-    /**
-     * Get freezetimeString
-     *
-     * @return string
-     */
-    public function getFreezetimeString()
+    public function getFreezetimeString(): ?string
     {
         return $this->freezetimeString;
     }
 
-    /**
-     * Set endtimeString
-     *
-     * @param string $endtimeString
-     *
-     * @return Contest
-     */
-    public function setEndtimeString($endtimeString)
+    public function setEndtimeString(?string $endtimeString): Contest
     {
         $this->endtimeString = $endtimeString;
         $this->endtime       = $this->getAbsoluteTime($endtimeString);
-
         return $this;
     }
 
-    /**
-     * Get endtimeString
-     *
-     * @return string
-     */
-    public function getEndtimeString()
+    public function getEndtimeString(): ?string
     {
         return $this->endtimeString;
     }
 
-    /**
-     * Set unfreezetimeString
-     *
-     * @param string $unfreezetimeString
-     *
-     * @return Contest
-     */
-    public function setUnfreezetimeString($unfreezetimeString)
+    public function setUnfreezetimeString(?string $unfreezetimeString): Contest
     {
         $this->unfreezetimeString = $unfreezetimeString;
         $this->unfreezetime       = $this->getAbsoluteTime($unfreezetimeString);
-
         return $this;
     }
 
-    /**
-     * Get unfreezetimeString
-     *
-     * @return string
-     */
-    public function getUnfreezetimeString()
+    public function getUnfreezetimeString(): ?string
     {
         return $this->unfreezetimeString;
     }
 
-    /**
-     * Set deactivatetimeString
-     *
-     * @param string $deactivatetimeString
-     *
-     * @return Contest
-     */
-    public function setDeactivatetimeString($deactivatetimeString)
+    public function setDeactivatetimeString(?string $deactivatetimeString): Contest
     {
         $this->deactivatetimeString = $deactivatetimeString;
         $this->deactivatetime       = $this->getAbsoluteTime($deactivatetimeString);
-
         return $this;
     }
 
-    /**
-     * Get deactivatetimeString
-     *
-     * @return string
-     */
-    public function getDeactivatetimeString()
+    public function getDeactivatetimeString(): ?string
     {
         return $this->deactivatetimeString;
     }
 
-    /**
-     * Set activatetime
-     *
-     * @param string $activatetime
-     *
-     * @return Contest
-     */
-    public function setActivatetime($activatetime)
+    public function setActivatetime(string $activatetime): Contest
     {
         $this->activatetime = $activatetime;
-
         return $this;
     }
 
-    /**
-     * Set freezetime
-     *
-     * @param string $freezetime
-     *
-     * @return Contest
-     */
-    public function setFreezetime($freezetime)
+    public function setFreezetime(string $freezetime): Contest
     {
         $this->freezetime = $freezetime;
-
         return $this;
     }
 
-    /**
-     * Set endtime
-     *
-     * @param string $endtime
-     *
-     * @return Contest
-     */
-    public function setEndtime($endtime)
+    public function setEndtime(string $endtime): Contest
     {
         $this->endtime = $endtime;
-
         return $this;
     }
 
-    /**
-     * Set unfreezetime
-     *
-     * @param string $unfreezetime
-     *
-     * @return Contest
-     */
-    public function setUnfreezetime($unfreezetime)
+    public function setUnfreezetime(string $unfreezetime): Contest
     {
         $this->unfreezetime = $unfreezetime;
-
         return $this;
     }
 
-    /**
-     * Set deactivatetime
-     *
-     * @param string $deactivatetime
-     *
-     * @return Contest
-     */
-    public function setDeactivatetime($deactivatetime)
+    public function setDeactivatetime(string $deactivatetime): Contest
     {
         $this->deactivatetime = $deactivatetime;
-
         return $this;
     }
 
-    /**
-     * Set enabled
-     *
-     * @param boolean $enabled
-     *
-     * @return Contest
-     */
-    public function setEnabled($enabled)
+    public function setEnabled(bool $enabled): Contest
     {
         $this->enabled = $enabled;
-
         return $this;
     }
 
-    /**
-     * Get enabled
-     *
-     * @return boolean
-     */
-    public function getEnabled()
+    public function getEnabled(): bool
     {
         return $this->enabled;
     }
 
-    /**
-     * Set processBalloons
-     *
-     * @param boolean $processBalloons
-     *
-     * @return Contest
-     */
-    public function setProcessBalloons($processBalloons)
+    public function setAllowSubmit(bool $allowSubmit): Contest
     {
-        $this->processBalloons = $processBalloons;
-
+        $this->allowSubmit = $allowSubmit;
         return $this;
     }
 
-    /**
-     * Get processBalloons
-     *
-     * @return boolean
-     */
-    public function getProcessBalloons()
+    public function getAllowSubmit(): bool
+    {
+        return $this->allowSubmit;
+    }
+
+    public function getWarningMessage(): ?string
+    {
+        return $this->warningMessage;
+    }
+
+    public function setWarningMessage(?string $warningMessage): Contest
+    {
+        $this->warningMessage = (empty($warningMessage) ? null : $warningMessage);
+        return $this;
+    }
+
+    public function setProcessBalloons(bool $processBalloons): Contest
+    {
+        $this->processBalloons = $processBalloons;
+        return $this;
+    }
+
+    public function getProcessBalloons(): bool
     {
         return $this->processBalloons;
     }
 
-    /**
-     * Set public
-     *
-     * @param boolean $public
-     *
-     * @return Contest
-     */
-    public function setPublic($public)
+    public function setMedalsEnabled(bool $medalsEnabled): Contest
     {
-        $this->public = $public;
+        $this->medalsEnabled = $medalsEnabled;
+        return $this;
+    }
+
+    public function getMedalsEnabled(): bool
+    {
+        return $this->medalsEnabled;
+    }
+
+    /**
+     * @return Collection|TeamCategory[]
+     */
+    public function getMedalCategories(): Collection
+    {
+        return $this->medal_categories;
+    }
+
+    public function addMedalCategory(TeamCategory $medalCategory): Contest
+    {
+        if (!$this->medal_categories->contains($medalCategory)) {
+            $this->medal_categories[] = $medalCategory;
+        }
 
         return $this;
     }
 
-    /**
-     * Get public
-     *
-     * @return boolean
-     */
-    public function getPublic()
+    public function removeMedalCategories(TeamCategory $medalCategory): Contest
+    {
+        if ($this->medal_categories->contains($medalCategory)) {
+            $this->medal_categories->removeElement($medalCategory);
+        }
+
+        return $this;
+    }
+
+    public function setGoldMedals(int $goldMedals): Contest
+    {
+        $this->goldMedals = $goldMedals;
+        return $this;
+    }
+
+    public function getGoldMedals(): int
+    {
+        return $this->goldMedals;
+    }
+
+    public function setSilverMedals(int $silverMedals): Contest
+    {
+        $this->silverMedals = $silverMedals;
+        return $this;
+    }
+
+    public function getSilverMedals(): int
+    {
+        return $this->silverMedals;
+    }
+
+    public function setBronzeMedals(int $bronzeMedals): Contest
+    {
+        $this->bronzeMedals = $bronzeMedals;
+        return $this;
+    }
+
+    public function getBronzeMedals(): int
+    {
+        return $this->bronzeMedals;
+    }
+
+    public function setPublic(bool $public): Contest
+    {
+        $this->public = $public;
+        return $this;
+    }
+
+    public function getPublic(): bool
     {
         return $this->public;
     }
 
-    /**
-     * Set open to all teams
-     *
-     * @param boolean $openToAllTeams
-     *
-     * @return Contest
-     */
-    public function setOpenToAllTeams($openToAllTeams)
+    public function setOpenToAllTeams(bool $openToAllTeams): Contest
     {
         $this->openToAllTeams = $openToAllTeams;
         if ($this->openToAllTeams) {
@@ -937,206 +814,117 @@ class Contest extends BaseApiEntity
         return $this;
     }
 
-    /**
-     * Get open to all teams
-     *
-     * @return boolean
-     */
-    public function isOpenToAllTeams()
+    public function isOpenToAllTeams(): bool
     {
         return $this->openToAllTeams;
     }
 
-    /**
-     * Add team
-     *
-     * @param \App\Entity\Team $team
-     *
-     * @return Contest
-     */
-    public function addTeam(\App\Entity\Team $team)
+    public function isLocked(): bool
     {
-        $this->teams[] = $team;
+        return $this->isLocked;
+    }
 
+    public function setIsLocked(bool $isLocked): Contest
+    {
+        $this->isLocked = $isLocked;
         return $this;
     }
 
-    /**
-     * Remove team
-     *
-     * @param \App\Entity\Team $team
-     */
-    public function removeTeam(\App\Entity\Team $team)
+    public function addTeam(Team $team): Contest
+    {
+        $this->teams[] = $team;
+        return $this;
+    }
+
+    public function removeTeam(Team $team): void
     {
         $this->teams->removeElement($team);
     }
 
-    /**
-     * Get teams
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getTeams()
+    public function getTeams(): Collection
     {
         return $this->teams;
     }
 
-    /**
-     * Add problem
-     *
-     * @param ContestProblem $problem
-     *
-     * @return Contest
-     */
-    public function addProblem(ContestProblem $problem)
+    public function addProblem(ContestProblem $problem): Contest
     {
         $this->problems[] = $problem;
-
         return $this;
     }
 
-    /**
-     * Remove problem
-     *
-     * @param ContestProblem $problem
-     */
-    public function removeProblem(ContestProblem $problem)
+    public function removeProblem(ContestProblem $problem): void
     {
         $this->problems->removeElement($problem);
     }
 
-    /**
-     * Get problems
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getProblems()
+    public function getProblems(): Collection
     {
         return $this->problems;
     }
 
-    /**
-     * Add clarification
-     *
-     * @param \App\Entity\Clarification $clarification
-     *
-     * @return Contest
-     */
-    public function addClarification(\App\Entity\Clarification $clarification)
+    public function addClarification(Clarification $clarification): Contest
     {
         $this->clarifications[] = $clarification;
-
         return $this;
     }
 
-    /**
-     * Remove clarification
-     *
-     * @param \App\Entity\Clarification $clarification
-     */
-    public function removeClarification(\App\Entity\Clarification $clarification)
+    public function removeClarification(Clarification $clarification): void
     {
         $this->clarifications->removeElement($clarification);
     }
 
-    /**
-     * Get clarifications
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getClarifications()
+    public function getClarifications(): Collection
     {
         return $this->clarifications;
     }
 
-    /**
-     * Add submission
-     *
-     * @param \App\Entity\Submission $submission
-     *
-     * @return Contest
-     */
-    public function addSubmission(\App\Entity\Submission $submission)
+    public function addSubmission(Submission $submission): Contest
     {
         $this->submissions[] = $submission;
-
         return $this;
     }
 
-    /**
-     * Remove submission
-     *
-     * @param \App\Entity\Submission $submission
-     */
-    public function removeSubmission(\App\Entity\Submission $submission)
+    public function removeSubmission(Submission $submission): void
     {
         $this->submissions->removeElement($submission);
     }
 
-    /**
-     * Get submissions
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getSubmissions()
+    public function getSubmissions(): Collection
     {
         return $this->submissions;
     }
 
-    /**
-     * Add internalError
-     *
-     * @param \App\Entity\InternalError $internalError
-     *
-     * @return Contest
-     */
-    public function addInternalError(\App\Entity\InternalError $internalError)
+    public function addInternalError(InternalError $internalError): Contest
     {
         $this->internal_errors[] = $internalError;
-
         return $this;
     }
 
-    /**
-     * Remove internalError
-     *
-     * @param \App\Entity\InternalError $internalError
-     */
-    public function removeInternalError(\App\Entity\InternalError $internalError)
+    public function removeInternalError(InternalError $internalError): void
     {
         $this->internal_errors->removeElement($internalError);
     }
 
-    /**
-     * Get internalErrors
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getInternalErrors()
+    public function getInternalErrors(): Collection
     {
         return $this->internal_errors;
     }
 
     /**
-     * Get duration for this contest
-     *
-     * @return string
      * @Serializer\VirtualProperty()
      * @Serializer\Type("string")
      */
-    public function getDuration()
+    public function getDuration(): string
     {
         return Utils::relTime($this->getEndtime() - $this->starttime);
     }
 
     /**
-     * Get scoreboard freeze duration for this contest
-     *
-     * @return string
      * @Serializer\VirtualProperty()
      * @Serializer\Type("string")
+     * @OA\Property(nullable=true)
      */
-    public function getScoreboardFreezeDuration()
+    public function getScoreboardFreezeDuration(): ?string
     {
         if (!empty($this->getFreezetime())) {
             return Utils::relTime($this->getEndtime() - $this->getFreezetime());
@@ -1148,38 +936,37 @@ class Contest extends BaseApiEntity
     /**
      * Returns true iff the contest is already and still active, and not disabled.
      */
-    public function isActive()
+    public function isActive(): bool
     {
         return $this->getEnabled() &&
             $this->getPublic() &&
+            ($this->activatetime <= time()) &&
             ($this->deactivatetime == null || $this->deactivatetime > time());
     }
 
     /**
-     * @param $time_string
-     * @return float|int|string|null
-     * @throws \Exception
+     * @return float|int|null
      */
-    public function getAbsoluteTime($time_string)
+    public function getAbsoluteTime(?string $time_string)
     {
         if ($time_string === null) {
             return null;
         } elseif (preg_match('/^[+-][0-9]+:[0-9]{2}(:[0-9]{2}(\.[0-9]{0,6})?)?$/', $time_string)) {
-            // FIXME: dedup code with non symfony code
             $sign           = ($time_string[0] == '-' ? -1 : +1);
             $time_string[0] = 0;
             $times          = explode(':', $time_string, 3);
+            $hours          = (int)$times[0];
+            $minutes        = (int)$times[1];
             if (count($times) == 2) {
-                $times[2] = '00';
+                $seconds = 0;
+            } else {
+                $seconds = (float)$times[2];
             }
-            $hours        = $times[0];
-            $minutes      = $times[1];
-            $seconds      = $times[2];
             $seconds      = $seconds + 60 * ($minutes + 60 * $hours);
             $seconds      *= $sign;
             $absoluteTime = $this->starttime + $seconds;
 
-            // Take into account the removed intervals
+            // Take into account the removed intervals.
             /** @var RemovedInterval[] $removedIntervals */
             $removedIntervals = $this->getRemovedIntervals()->toArray();
             usort($removedIntervals, function (RemovedInterval $a, RemovedInterval $b) {
@@ -1194,73 +981,48 @@ class Contest extends BaseApiEntity
 
             return $absoluteTime;
         } else {
-            $date = new \DateTime($time_string);
+            try {
+                $date = new DateTime($time_string);
+            } catch (Exception $e) {
+                return null;
+            }
             return $date->format('U.v');
         }
     }
 
-    /**
-     * Add removedInterval
-     *
-     * @param RemovedInterval $removedInterval
-     *
-     * @return Contest
-     */
-    public function addRemovedInterval(RemovedInterval $removedInterval)
+    public function addRemovedInterval(RemovedInterval $removedInterval): Contest
     {
         $this->removedIntervals->add($removedInterval);
-
         return $this;
     }
 
-    /**
-     * Remove removedInterval
-     *
-     * @param RemovedInterval $removedInterval
-     */
-    public function removeRemovedInterval(RemovedInterval $removedInterval)
+    public function removeRemovedInterval(RemovedInterval $removedInterval): void
     {
         $this->removedIntervals->removeElement($removedInterval);
     }
 
-    /**
-     * Get removedIntervals
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getRemovedIntervals()
+    public function getRemovedIntervals(): Collection
     {
         return $this->removedIntervals;
     }
 
-    /**
-     * Get the contest time for a given wall time
-     * @param float $wallTime
-     * @return float
-     */
     public function getContestTime(float $wallTime): float
     {
         $contestTime = Utils::difftime($wallTime, (float)$this->getStarttime(false));
-        if (false/*ALLOW_REMOVED_INTERVALS*/) { // TODO: use constant when we have access to it in Symfony
-            /** @var RemovedInterval $removedInterval */
-            foreach ($this->getRemovedIntervals() as $removedInterval) {
-                if (Utils::difftime((float)$removedInterval->getStarttime(), $wallTime) < 0) {
-                    $contestTime -= min(
-                        Utils::difftime($wallTime, (float)$removedInterval->getStarttime()),
-                        Utils::difftime((float)$removedInterval->getEndtime(), (float)$removedInterval->getStarttime())
-                    );
-                }
+        /** @var RemovedInterval $removedInterval */
+        foreach ($this->getRemovedIntervals() as $removedInterval) {
+            if (Utils::difftime((float)$removedInterval->getStarttime(), $wallTime) < 0) {
+                $contestTime -= min(
+                    Utils::difftime($wallTime, (float)$removedInterval->getStarttime()),
+                    Utils::difftime((float)$removedInterval->getEndtime(), (float)$removedInterval->getStarttime())
+                );
             }
         }
 
         return $contestTime;
     }
 
-    /**
-     * Get the data to display in the jury interface for the given contest
-     * @return array
-     */
-    public function getJuryTimeData(): array
+    public function getDataForJuryInterface(): array
     {
         $now         = Utils::now();
         $times       = ['activate', 'start', 'freeze', 'end', 'unfreeze', 'finalize', 'deactivate'];
@@ -1290,7 +1052,7 @@ class Contest extends BaseApiEntity
             } elseif (empty($timeValue)) {
                 $resultItem['icon'] = null;
             } elseif (Utils::difftime((float)$timeValue, $now) <= 0) {
-                // this event has passed, mark as such
+                // This event has passed, mark as such.
                 $resultItem['icon'] = 'check';
                 $prevchecked        = true;
             } elseif ($prevchecked) {
@@ -1299,7 +1061,7 @@ class Contest extends BaseApiEntity
             }
 
             $resultItem['label'] = sprintf('%s time', ucfirst($time));
-            $resultItem['time']  = Utils::printtime($timeValue, '%Y-%m-%d %H:%M (%Z)');
+            $resultItem['time']  = Utils::printtime($timeValue, 'Y-m-d H:i:s (T)');
             if ($time === 'start' && !$this->getStarttimeEnabled()) {
                 $resultItem['class'] = 'ignore';
             }
@@ -1347,11 +1109,7 @@ class Contest extends BaseApiEntity
         return $result;
     }
 
-    /**
-     * Get the state for this contest
-     * @return array
-     */
-    public function getState()
+    public function getState(): ?array
     {
         $time_or_null             = function ($time, $extra_cond = true) {
             if (!$extra_cond || $time === null || Utils::now() < $time) {
@@ -1378,20 +1136,12 @@ class Contest extends BaseApiEntity
         return $result;
     }
 
-    /**
-     * Get the number of remaining minutes for this contest
-     * @return int
-     */
     public function getMinutesRemaining(): int
     {
         return (int)floor(($this->getEndtime() - $this->getFreezetime()) / 60);
     }
 
-    /**
-     * Get the freeze data for this contest
-     * @return FreezeData
-     */
-    public function getFreezeData()
+    public function getFreezeData(): FreezeData
     {
         return new FreezeData($this);
     }
@@ -1400,18 +1150,17 @@ class Contest extends BaseApiEntity
      * @ORM\PrePersist()
      * @ORM\PreUpdate()
      */
-    public function updateTimes()
+    public function updateTimes(): void
     {
-        // Update the start times, as this will update all other fields
-        $this->setStarttime(strtotime($this->getStarttimeString()));
+        // Update the start times, as this will update all other fields.
+        $this->setStarttime((float)strtotime($this->getStarttimeString()));
         $this->setStarttimeString($this->getStarttimeString());
     }
 
     /**
-     * @param ExecutionContextInterface $context
      * @Assert\Callback()
      */
-    public function validate(ExecutionContextInterface $context)
+    public function validate(ExecutionContextInterface $context): void
     {
         $this->updateTimes();
         if (Utils::difftime((float)$this->getEndtime(), (float)$this->getStarttime(true)) <= 0) {
@@ -1465,14 +1214,30 @@ class Contest extends BaseApiEntity
             }
         }
 
+        if ($this->medalsEnabled) {
+            foreach (['goldMedals', 'silverMedals', 'bronzeMedals'] as $field) {
+                if ($this->$field === null) {
+                    $context
+                        ->buildViolation('This field is required when \'Enable medals\' is set.')
+                        ->atPath($field)
+                        ->addViolation();
+                }
+            }
+            if ($this->medal_categories === null || $this->medal_categories->isEmpty()) {
+                $context
+                    ->buildViolation('This field is required when \'Process medals\' is set.')
+                    ->atPath('medalCategories')
+                    ->addViolation();
+            }
+        }
+
         /** @var ContestProblem $problem */
         foreach ($this->problems as $idx => $problem) {
-            // Check if the problem ID is unique
-            $otherProblemIds = $this->problems->filter(function (ContestProblem $otherProblem) use ($problem) {
-                return $otherProblem !== $problem;
-            })->map(function (ContestProblem $problem) {
-                return $problem->getProblem()->getProbid();
-            })->toArray();
+            // Check if the problem ID is unique.
+            $otherProblemIds = $this->problems
+                ->filter(fn(ContestProblem $otherProblem) => $otherProblem !== $problem)
+                ->map(fn(ContestProblem $problem) => $problem->getProblem()->getProbid())
+                ->toArray();
             $problemId       = $problem->getProblem()->getProbid();
             if (in_array($problemId, $otherProblemIds)) {
                 $context
@@ -1481,12 +1246,11 @@ class Contest extends BaseApiEntity
                     ->addViolation();
             }
 
-            // Check if the problem shortname is unique
-            $otherShortNames = $this->problems->filter(function (ContestProblem $otherProblem) use ($problem) {
-                return $otherProblem !== $problem;
-            })->map(function (ContestProblem $problem) {
-                return strtolower($problem->getShortname());
-            })->toArray();
+            // Check if the problem shortname is unique.
+            $otherShortNames = $this->problems
+                ->filter(fn(ContestProblem $otherProblem) => $otherProblem !== $problem)
+                ->map(fn(ContestProblem $problem) => strtolower($problem->getShortname()))
+                ->toArray();
             $shortname = strtolower($problem->getShortname());
             if (in_array($shortname, $otherShortNames)) {
                 $context
@@ -1499,7 +1263,6 @@ class Contest extends BaseApiEntity
 
     /**
      * Return whether a (wall clock) time falls within the contest.
-     * @return bool
      */
     public function isTimeInContest(float $time): bool
     {
@@ -1507,14 +1270,10 @@ class Contest extends BaseApiEntity
                Utils::difftime((float)$this->getEndtime(), $time) > 0;
     }
 
-    /**
-     * Get a countdown string for this contest to display in the UI
-     * @return string
-     */
-    public function getCountdown(): string
+    public function getCountdownString(): string
     {
         $now = Utils::now();
-        if (Utils::difftime((float)$this->getActivatetime(),$now) <= 0) {
+        if (Utils::difftime((float)$this->getActivatetime(), $now) <= 0) {
             if (!$this->getStarttimeEnabled()) {
                 return 'start delayed';
             }
@@ -1557,5 +1316,78 @@ class Contest extends BaseApiEntity
         }
 
         return $this;
+    }
+
+    /**
+     * @return Collection|ExternalContestSource[]
+     */
+    public function getExternalContestSources(): Collection
+    {
+        return $this->externalContestSources;
+    }
+
+    public function addExternalContestSource(ExternalContestSource $externalContestSource): self
+    {
+        if (!$this->externalContestSources->contains($externalContestSource)) {
+            $this->externalContestSources[] = $externalContestSource;
+        }
+
+        return $this;
+    }
+
+    public function removeExternalContestSource(ExternalContestSource $externalContestSource): self
+    {
+        if ($this->externalContestSources->contains($externalContestSource)) {
+            $this->externalContestSources->removeElement($externalContestSource);
+        }
+
+        return $this;
+    }
+
+    public function getBannerFile(): ?UploadedFile
+    {
+        return $this->bannerFile;
+    }
+
+    public function setBannerFile(?UploadedFile $bannerFile): Contest
+    {
+        $this->bannerFile = $bannerFile;
+        return $this;
+    }
+
+    public function isClearBanner(): bool
+    {
+        return $this->clearBanner;
+    }
+
+    public function setClearBanner(bool $clearBanner): Contest
+    {
+        $this->clearBanner = $clearBanner;
+        return $this;
+    }
+
+    public function getAssetProperties(): array
+    {
+        return ['banner'];
+    }
+
+    public function getAssetFile(string $property): ?UploadedFile
+    {
+        switch ($property) {
+            case 'banner':
+                return $this->getBannerFile();
+        }
+
+        return null;
+    }
+
+    public function isClearAsset(string $property): ?bool
+    {
+        switch ($property) {
+            case 'banner':
+                return $this->isClearBanner();
+        }
+
+        return null;
     }
 }

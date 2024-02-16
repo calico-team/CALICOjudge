@@ -1,9 +1,8 @@
 <?php declare(strict_types=1);
 namespace App\Utils;
 
-use App\Entity\SubmissionFile;
 use DateTime;
-use Doctrine\Common\Inflector\Inflector;
+use Doctrine\Inflector\InflectorFactory;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -162,276 +161,25 @@ class Utils
         "yellowgreen" => "#9acd32",
     ];
 
-    /** @var array Mapping from ISO3166-1 alpha-3 to country names */
-    const ALPHA3_COUNTRIES = [
-        "AFG" => "Afghanistan",
-        // Removed since not an "official" country
-        // "ALA" => "Åland Islands",
-        "ALB" => "Albania",
-        "DZA" => "Algeria",
-        "ASM" => "American Samoa",
-        "AND" => "Andorra",
-        "AGO" => "Angola",
-        "AIA" => "Anguilla",
-        "ATA" => "Antarctica",
-        "ATG" => "Antigua and Barbuda",
-        "ARG" => "Argentina",
-        "ARM" => "Armenia",
-        "ABW" => "Aruba",
-        "AUS" => "Australia",
-        "AUT" => "Austria",
-        "AZE" => "Azerbaijan",
-        "BHS" => "Bahamas",
-        "BHR" => "Bahrain",
-        "BGD" => "Bangladesh",
-        "BRB" => "Barbados",
-        "BLR" => "Belarus",
-        "BEL" => "Belgium",
-        "BLZ" => "Belize",
-        "BEN" => "Benin",
-        "BMU" => "Bermuda",
-        "BTN" => "Bhutan",
-        "BOL" => "Bolivia",
-        // Removed since not an "official" country
-        // "BES" => "Bonaire, Sint Eustatius and Saba",
-        "BIH" => "Bosnia and Herzegovina",
-        "BWA" => "Botswana",
-        "BVT" => "Bouvet Island",
-        "BRA" => "Brazil",
-        "IOT" => "British Indian Ocean Territory",
-        "BRN" => "Brunei Darussalam",
-        "BGR" => "Bulgaria",
-        "BFA" => "Burkina Faso",
-        "BDI" => "Burundi",
-        "CPV" => "Cabo Verde",
-        "KHM" => "Cambodia",
-        "CMR" => "Cameroon",
-        "CAN" => "Canada",
-        "CYM" => "Cayman Islands",
-        "CAF" => "Central African Republic",
-        "TCD" => "Chad",
-        "CHL" => "Chile",
-        "CHN" => "China",
-        "CXR" => "Christmas Island",
-        "CCK" => "Cocos (Keeling) Islands",
-        "COL" => "Colombia",
-        "COM" => "Comoros",
-        "COG" => "Congo",
-        "COD" => "Congo (Democratic Republic of the)",
-        "COK" => "Cook Islands",
-        "CRI" => "Costa Rica",
-        "CIV" => "Côte d'Ivoire",
-        "HRV" => "Croatia",
-        "CUB" => "Cuba",
-        "CUW" => "Curaçao",
-        "CYP" => "Cyprus",
-        "CZE" => "Czechia",
-        "DNK" => "Denmark",
-        "DJI" => "Djibouti",
-        "DMA" => "Dominica",
-        "DOM" => "Dominican Republic",
-        "ECU" => "Ecuador",
-        "EGY" => "Egypt",
-        "SLV" => "El Salvador",
-        "GNQ" => "Equatorial Guinea",
-        "ERI" => "Eritrea",
-        "EST" => "Estonia",
-        "ETH" => "Ethiopia",
-        "SWZ" => "Eswatini",
-        "FLK" => "Falkland Islands",
-        "FRO" => "Faroe Islands",
-        "FJI" => "Fiji",
-        "FIN" => "Finland",
-        "FRA" => "France",
-        "GUF" => "French Guiana",
-        "PYF" => "French Polynesia",
-        "ATF" => "French Southern Territories",
-        "GAB" => "Gabon",
-        "GMB" => "Gambia",
-        "GEO" => "Georgia",
-        "DEU" => "Germany",
-        "GHA" => "Ghana",
-        "GIB" => "Gibraltar",
-        "GRC" => "Greece",
-        "GRL" => "Greenland",
-        "GRD" => "Grenada",
-        "GLP" => "Guadeloupe",
-        "GUM" => "Guam",
-        "GTM" => "Guatemala",
-        "GGY" => "Guernsey",
-        "GIN" => "Guinea",
-        "GNB" => "Guinea-Bissau",
-        "GUY" => "Guyana",
-        "HTI" => "Haiti",
-        "HMD" => "Heard and McDonald Islands",
-        "VAT" => "Holy See",
-        "HND" => "Honduras",
-        "HKG" => "Hong Kong",
-        "HUN" => "Hungary",
-        "ISL" => "Iceland",
-        "IND" => "India",
-        "IDN" => "Indonesia",
-        "IRN" => "Iran",
-        "IRQ" => "Iraq",
-        "IRL" => "Ireland",
-        "IMN" => "Isle of Man",
-        "ISR" => "Israel",
-        "ITA" => "Italy",
-        "JAM" => "Jamaica",
-        "JPN" => "Japan",
-        "JEY" => "Jersey",
-        "JOR" => "Jordan",
-        "KAZ" => "Kazakhstan",
-        "KEN" => "Kenya",
-        "KIR" => "Kiribati",
-        "PRK" => "North Korea",
-        "KOR" => "South Korea",
-        "KWT" => "Kuwait",
-        "KGZ" => "Kyrgyzstan",
-        "LAO" => "Laos",
-        "LVA" => "Latvia",
-        "LBN" => "Lebanon",
-        "LSO" => "Lesotho",
-        "LBR" => "Liberia",
-        "LBY" => "Libya",
-        "LIE" => "Liechtenstein",
-        "LTU" => "Lithuania",
-        "LUX" => "Luxembourg",
-        "MAC" => "Macao",
-        "MKD" => "North Macedonia",
-        "MDG" => "Madagascar",
-        "MWI" => "Malawi",
-        "MYS" => "Malaysia",
-        "MDV" => "Maldives",
-        "MLI" => "Mali",
-        "MLT" => "Malta",
-        "MHL" => "Marshall Islands",
-        "MTQ" => "Martinique",
-        "MRT" => "Mauritania",
-        "MUS" => "Mauritius",
-        "MYT" => "Mayotte",
-        "MEX" => "Mexico",
-        "FSM" => "Micronesia",
-        "MDA" => "Moldova",
-        "MCO" => "Monaco",
-        "MNG" => "Mongolia",
-        "MNE" => "Montenegro",
-        "MSR" => "Montserrat",
-        "MAR" => "Morocco",
-        "MOZ" => "Mozambique",
-        "MMR" => "Myanmar",
-        "NAM" => "Namibia",
-        "NRU" => "Nauru",
-        "NPL" => "Nepal",
-        "NLD" => "Netherlands",
-        "NCL" => "New Caledonia",
-        "NZL" => "New Zealand",
-        "NIC" => "Nicaragua",
-        "NER" => "Niger",
-        "NGA" => "Nigeria",
-        "NIU" => "Niue",
-        "NFK" => "Norfolk Island",
-        "MNP" => "Northern Mariana Islands",
-        "NOR" => "Norway",
-        "OMN" => "Oman",
-        "PAK" => "Pakistan",
-        "PLW" => "Palau",
-        "PSE" => "Palestine, State of",
-        "PAN" => "Panama",
-        "PNG" => "Papua New Guinea",
-        "PRY" => "Paraguay",
-        "PER" => "Peru",
-        "PHL" => "Philippines",
-        "PCN" => "Pitcairn",
-        "POL" => "Poland",
-        "PRT" => "Portugal",
-        "PRI" => "Puerto Rico",
-        "QAT" => "Qatar",
-        "REU" => "Réunion",
-        "ROU" => "Romania",
-        "RUS" => "Russian Federation",
-        "RWA" => "Rwanda",
-        "BLM" => "Saint Barthélemy",
-        "SHN" => "Saint Helena, Ascension and Tristan da Cunha",
-        "KNA" => "Saint Kitts and Nevis",
-        "LCA" => "Saint Lucia",
-        "MAF" => "Saint Martin",
-        "SPM" => "Saint Pierre and Miquelon",
-        "VCT" => "Saint Vincent and the Grenadines",
-        "WSM" => "Samoa",
-        "SMR" => "San Marino",
-        "STP" => "Sao Tome and Principe",
-        "SAU" => "Saudi Arabia",
-        "SEN" => "Senegal",
-        "SRB" => "Serbia",
-        "SYC" => "Seychelles",
-        "SLE" => "Sierra Leone",
-        "SGP" => "Singapore",
-        "SXM" => "Sint Maarten",
-        "SVK" => "Slovakia",
-        "SVN" => "Slovenia",
-        "SLB" => "Solomon Islands",
-        "SOM" => "Somalia",
-        "ZAF" => "South Africa",
-        "SGS" => "South Georgia and the South Sandwich Islands",
-        "SSD" => "South Sudan",
-        "ESP" => "Spain",
-        "LKA" => "Sri Lanka",
-        "SDN" => "Sudan",
-        "SUR" => "Suriname",
-        "SJM" => "Svalbard and Jan Mayen",
-        "SWE" => "Sweden",
-        "CHE" => "Switzerland",
-        "SYR" => "Syrian Arab Republic",
-        "TWN" => "Taiwan",
-        "TJK" => "Tajikistan",
-        "TZA" => "Tanzania",
-        "THA" => "Thailand",
-        "TLS" => "Timor-Leste",
-        "TGO" => "Togo",
-        "TKL" => "Tokelau",
-        "TON" => "Tonga",
-        "TTO" => "Trinidad and Tobago",
-        "TUN" => "Tunisia",
-        "TUR" => "Turkey",
-        "TKM" => "Turkmenistan",
-        "TCA" => "Turks and Caicos Islands",
-        "TUV" => "Tuvalu",
-        "UGA" => "Uganda",
-        "UKR" => "Ukraine",
-        "ARE" => "United Arab Emirates",
-        "GBR" => "United Kingdom",
-        "USA" => "United States of America",
-        "UMI" => "United States Minor Outlying Islands",
-        "URY" => "Uruguay",
-        "UZB" => "Uzbekistan",
-        "VUT" => "Vanuatu",
-        "VEN" => "Venezuela",
-        "VNM" => "Viet Nam",
-        "VGB" => "Virgin Islands (British)",
-        "VIR" => "Virgin Islands (U.S.)",
-        "WLF" => "Wallis and Futuna",
-        "ESH" => "Western Sahara",
-        "YEM" => "Yemen",
-        "ZMB" => "Zambia",
-        "ZWE" => "Zimbabwe",
-    ];
+    const GD_MISSING = 'Cannot import image: the PHP GD library is missing.';
+
+    const DAY_IN_SECONDS = 60*60*24;
 
     /**
-     * returns the milliseconds part of a time stamp truncated at three digits
+     * Returns the milliseconds part of a time stamp truncated at three digits.
      */
-    private static function getMillis(float $seconds) : string
+    private static function getMillis(float $seconds): string
     {
         return sprintf(".%03d", floor(1000 * $seconds - 1000 * floor($seconds)));
     }
 
     /**
-     * prints the absolute time as yyyy-mm-ddThh:mm:ss(.uuu)?[+-]zz(:mm)?
-     * (with millis if $floored is false)
+     * Prints the absolute time as yyyy-mm-ddThh:mm:ss(.uuu)?[+-]zz(:mm)?
+     * (with millis if $floored is false).
      */
-    public static function absTime($epoch, bool $floored = false) : ?string
+    public static function absTime($epoch, bool $floored = false): ?string
     {
-        if ($epoch===null) {
+        if ($epoch === null) {
             return null;
         }
         $millis = Utils::getMillis((float) $epoch);
@@ -441,10 +189,10 @@ class Utils
     }
 
     /**
-     * prints a time diff as relative time as (-)?(h)*h:mm:ss(.uuu)?
-     * (with millis if $floored is false)
+     * Prints a time diff as relative time as (-)?(h)*h:mm:ss(.uuu)?
+     * (with millis if $floored is false).
      */
-    public static function relTime(float $seconds, bool $floored = false) : string
+    public static function relTime(float $seconds, bool $floored = false): string
     {
         $sign = ($seconds < 0) ? '-' : '';
         $seconds = abs($seconds);
@@ -462,7 +210,7 @@ class Utils
      * the formats understood by DateTime (e.g. an ISO 8601 date and time with
      * fractional seconds). Throws an exception if $time cannot be parsed.
      */
-    public static function toEpochFloat(string $time) : float
+    public static function toEpochFloat(string $time): float
     {
         $dt = new DateTime($time);
         return (float)sprintf('%d.%06d', $dt->getTimestamp(), $dt->format('u'));
@@ -473,7 +221,7 @@ class Utils
      * simulate MySQL UNIX_TIMESTAMP() function to create insert
      * queries that do not change when replicated later.
      */
-    public static function now() : float
+    public static function now(): float
     {
         return microtime(true);
     }
@@ -482,7 +230,7 @@ class Utils
      * Returns >0, =0, <0 when $time1 >, =, < $time2 respectively.
      * Returned value is time difference in seconds.
      */
-    public static function difftime(float $time1, float $time2) : float
+    public static function difftime(float $time1, float $time2): float
     {
         return $time1 - $time2;
     }
@@ -490,12 +238,17 @@ class Utils
     /**
      * Calculate the difference between two HH:MM:SS strings and output again in that format.
      * Assumes that $time1 >= $time2.
-     * @param string $time1
-     * @param string $time2
-     * @return string
      */
-    public static function timeStringDiff(string $time1, string $time2) : string
+    public static function timeStringDiff(string $time1, string $time2): string
     {
+        // Add 00: to both times if they only contain one :. This might be the case if we have no hours
+        if (count(explode(':', $time1)) == 2) {
+            $time1 = '00:' . $time1;
+        }
+        if (count(explode(':', $time2)) == 2) {
+            $time2 = '00:' . $time2;
+        }
+
         sscanf($time1, '%2d:%2d:%2d', $h1, $m1, $s1);
         sscanf($time2, '%2d:%2d:%2d', $h2, $m2, $s2);
 
@@ -510,11 +263,9 @@ class Utils
     }
 
     /**
-     * Convert the given color to a hex value
-     * @param string $color
-     * @return string|null
+     * Convert the given color to a hex value.
      */
-    public static function convertToHex(string $color) : ?string
+    public static function convertToHex(string $color): ?string
     {
         if (preg_match('/^#[[:xdigit:]]{3,6}$/', $color)) {
             return $color;
@@ -528,11 +279,9 @@ class Utils
     }
 
     /**
-     * Conver the given hex color to the best matching string representation
-     * @param string $hex
-     * @return string|null
+     * Convert the given hex color to the best matching string representation.
      */
-    public static function convertToColor(string $hex) : ?string
+    public static function convertToColor(string $hex): ?string
     {
         if (!preg_match('/^#[[:xdigit:]]{3,6}$/', $hex)) {
             return $hex;
@@ -571,12 +320,41 @@ class Utils
     }
 
     /**
-     * Return a rounded float
-     * @param float|null $value
-     * @param int $decimals
-     * @return float|null
+     * Parse a hex color into it's three RGB values.
      */
-    public static function roundedFloat(float $value = null, int $decimals = 3) : ?float
+    public static function parseHexColor(string $hex): array
+    {
+        // Source: https://stackoverflow.com/a/21966100
+        $length = (strlen($hex) - 1) / 3;
+        $fact = [17, 1, 0.062272][$length - 1];
+        return [
+            (int)round(hexdec(substr($hex, 1, $length)) * $fact),
+            (int)round(hexdec(substr($hex, 1 + $length, $length)) * $fact),
+            (int)round(hexdec(substr($hex, 1 + 2 * $length, $length)) * $fact)
+        ];
+    }
+
+    /**
+     * Comvert an RGB component to its hex value.
+     */
+    public static function componentToHex(int $component): string
+    {
+        $hex = dechex($component);
+        return strlen($hex) == 1 ? "0" . $hex : $hex;
+    }
+
+    /**
+     * Convert an RGB triple into a CSS hex color.
+     */
+    public static function rgbToHex(array $color): string
+    {
+        return "#" . static::componentToHex($color[0]) . static::componentToHex($color[1]) . static::componentToHex($color[2]);
+    }
+
+    /**
+     * Return a rounded float.
+     */
+    public static function roundedFloat(?float $value = null, int $decimals = 3): ?float
     {
         if (is_null($value)) {
             return null;
@@ -599,9 +377,8 @@ class Utils
      * @param int $numSubmissions The total number of tries for this problem by this team
      * @param int $penaltyTime The penalty time for every wrong submission
      * @param bool $scoreIsInSeconds Whether scoring is in seconds
-     * @return int
      */
-    public static function calcPenaltyTime(bool $solved, int $numSubmissions, int $penaltyTime, bool $scoreIsInSeconds) : int
+    public static function calcPenaltyTime(bool $solved, int $numSubmissions, int $penaltyTime, bool $scoreIsInSeconds): int
     {
         if (!$solved) {
             return 0;
@@ -618,15 +395,14 @@ class Utils
     }
 
     /**
-     * Get the time as used on the scoreboard (i.e. truncated minutes or seconds, depending on the scoreboard resolution setting).
+     * Get the time as used on the scoreboard (i.e. truncated minutes or seconds, depending on the scoreboard
+     * resolution setting).
      * @param float|string $time
-     * @param bool $scoreIsInSeconds
-     * @return int
      */
-    public static function scoretime($time, bool $scoreIsInSeconds) : int
+    public static function scoretime($time, bool $scoreIsInSeconds): int
     {
         if ($scoreIsInSeconds) {
-            $result = (int)floor($time);
+            $result = (int)($time);
         } else {
             $result = (int)floor($time / 60);
         }
@@ -636,9 +412,9 @@ class Utils
     /**
      * Formats a given hostname. If $full = true, then
      * the full hostname will be printed, else only
-     * the local part (for keeping tables readable)
+     * the local part (for keeping tables readable).
      */
-    public static function printhost(string $hostname, bool $full = false) : string
+    public static function printhost(string $hostname, bool $full = false): string
     {
         // Shorten the hostname to first label, but not if it's an IP address.
         if (! $full  && !preg_match('/^\d{1,3}(\.\d{1,3}){3}$/', $hostname)) {
@@ -653,7 +429,7 @@ class Utils
      * Print (file) size in human readable format by using B,KB,MB,GB suffixes.
      * Input is a integer (the size in bytes), output a string with suffix.
      */
-    public static function printsize(int $size, int $decimals = 1) : string
+    public static function printsize(int $size, int $decimals = 1): string
     {
         $factor = 1024;
         $units = ['B', 'KB', 'MB', 'GB'];
@@ -661,7 +437,7 @@ class Utils
 
         $exact = true;
         for ($i = 0; $i < count($units) && $display > $factor; $i++) {
-            if (($display % $factor)!=0) {
+            if (((int)$display % $factor)!=0) {
                 $exact = false;
             }
             $display /= $factor;
@@ -670,32 +446,27 @@ class Utils
         if ($exact) {
             $decimals = 0;
         }
-        return sprintf("%.${decimals}lf %s", round($display, $decimals), $units[$i]);
+        return sprintf("%.{$decimals}lf %s", round($display, $decimals), $units[$i]);
     }
 
     /**
-     * Print a time formatted as specified. The format is according to strftime().
+     * Print a time formatted as specified. The format is according to date().
      * @param string|float $datetime
-     * @param string       $format
-     * @return string
      */
-    public static function printtime($datetime, string $format) : string
+    public static function printtime($datetime, string $format): string
     {
         if (empty($datetime)) {
             return '';
         }
-        return Utils::specialchars(strftime($format, (int)floor($datetime)));
+        return Utils::specialchars(date($format, (int)$datetime));
     }
 
     /**
      * Print the time something took from start to end (which defaults to now).
      *
      * Copied from lib/www/print.php
-     * @param float $start
-     * @param float|null $end
-     * @return string
      */
-    public static function printtimediff(float $start, float $end = null) : string
+    public static function printtimediff(float $start, ?float $end = null): string
     {
         if (is_null($end)) {
             $end = microtime(true);
@@ -729,11 +500,8 @@ class Utils
      * - ENT_HTML5: Display those single quotes as the HTML5 entity &apos;.
      * - ENT_SUBSTITUTE: Replace any invalid Unicode characters with the
      *   Unicode replacement character.
-     *
-     * @param string $string
-     * @return string
      */
-    public static function specialchars(string $string) : string
+    public static function specialchars(string $string): string
     {
         return htmlspecialchars(
             $string,
@@ -743,11 +511,8 @@ class Utils
 
     /**
      * Cut a string at $size chars and append ..., only if necessary.
-     * @param string $str
-     * @param int    $size
-     * @return string
      */
-    public static function cutString(string $str, int $size) : string
+    public static function cutString(string $str, int $size): string
     {
         // is the string already short enough?
         // we count '…' for 1 extra chars.
@@ -759,16 +524,13 @@ class Utils
     }
 
     /**
-     * Compute the LCS diff of two lines
-     * @param string $line1
-     * @param string $line2
-     * @return array
+     * Compute the LCS diff of two lines.
      */
     public static function computeLcsDiff(string $line1, string $line2): array
     {
         $tokens1 = preg_split('/\s+/', $line1);
         $tokens2 = preg_split('/\s+/', $line2);
-        $cutoff = 100; // a) LCS gets inperformant, b) the output is not longer readable
+        $cutoff = 100; // a) LCS gets in-performant, b) the output is no longer readable.
 
         $n1 = min($cutoff, sizeof($tokens1));
         $n2 = min($cutoff, sizeof($tokens2));
@@ -806,12 +568,12 @@ class Utils
         }
         $lcs = array_reverse($lcs);
 
-        // reconstruct diff
+        // Reconstruct diff.
         $diff = "";
         $l = sizeof($lcs);
         $i = 0;
         $j = 0;
-        for ($k = 0; $k < $l ; $k++) {
+        for ($k = 0; $k < $l; $k++) {
             while ($i < $n1 && $tokens1[$i] != $lcs[$k]) {
                 $diff .= "<del>" . Utils::specialchars($tokens1[$i]) . "</del> ";
                 $i++;
@@ -841,21 +603,14 @@ class Utils
         return [true, $diff];
     }
 
-    public static function balloonSym(string $color) : string
-    {
-        return sprintf('<i style="color: %s" class="fas fa-golf-ball"></i>', self::specialchars($color));
-    }
-
     /**
-     * Determine the image type for this image
-     * @param string $image
-     * @param string $error
+     * Determine the image type for this image.
      * @return bool|string
      */
-    public static function getImageType(string $image, &$error)
+    public static function getImageType(string $image, ?string &$error = null)
     {
         if (!function_exists('gd_info')) {
-            $error = "Cannot import image: the PHP GD library is missing.";
+            $error = self::GD_MISSING;
             return false;
         }
 
@@ -876,18 +631,14 @@ class Utils
     }
 
     /**
-     * Generate resized thumbnail image and return as as string.
+     * Generate resized thumbnail image and return as string.
      * Return FALSE on errors and stores error message in $error if set.
-     * @param string $image
-     * @param int    $thumbMaxSize
-     * @param string $tmpdir
-     * @param string $error
      * @return bool|false|string
      */
-    public static function getImageThumb(string $image, int $thumbMaxSize, string $tmpdir, &$error)
+    public static function getImageThumb(string $image, int $thumbMaxSize, string $tmpdir, ?string &$error = null)
     {
         if (!function_exists('gd_info')) {
-            $error = "Cannot import image: the PHP GD library is missing.";
+            $error = self::GD_MISSING;
             return false;
         }
 
@@ -951,35 +702,53 @@ class Utils
     }
 
     /**
-     * Returns TRUE iff string $haystack starts with string $needle
-     * @param string $haystack
-     * @param string $needle
-     * @return bool
+     * Get the image size of the given image.
+     *
+     * This method supports PNG, JPG, BMP, GIF and SVG files.
+     *
+     * Returns an array with three items: the width, height and ratio between width and height.
      */
-    public static function startsWith(string $haystack, string $needle) : bool
+    public static function getImageSize(string $filename): array
+    {
+        if (mime_content_type($filename) === 'image/svg+xml') {
+            $svg = simplexml_load_file($filename);
+            if ($viewBox = $svg['viewBox']) {
+                $viewBoxData = explode(' ', (string)$viewBox);
+                $width = (int)$viewBoxData[2];
+                $height = (int)$viewBoxData[3];
+            } else {
+                $width = (int)$svg['width'];
+                $height = (int)$svg['height'];
+            }
+        } else {
+            $size = @getimagesize($filename);
+            $width = $size[0];
+            $height = $size[1];
+        }
+
+        return [$width, $height, $width / $height];
+    }
+
+    /**
+     * Returns TRUE iff string $haystack starts with string $needle.
+     */
+    public static function startsWith(string $haystack, string $needle): bool
     {
         return mb_substr($haystack, 0, mb_strlen($needle)) === $needle;
     }
 
     /**
-     * Returns TRUE iff string $haystack ends with string $needle
-     * @param string $haystack
-     * @param string $needle
-     * @return bool
+     * Returns TRUE iff string $haystack ends with string $needle.
      */
-    public static function endsWith(string $haystack, string $needle) : bool
+    public static function endsWith(string $haystack, string $needle): bool
     {
         return mb_substr($haystack, mb_strlen($haystack)-mb_strlen($needle)) === $needle;
     }
 
     /**
      * Word wrap only unquoted text.
-     * @param string $text
-     * @param int    $width
-     * @param string $quote
-     * @return string
      */
-    public static function wrapUnquoted(string $text, int $width = 75, string $quote = '>') : string
+    public static function wrapUnquoted(string $text, int $width = 75, string $quote = '>'): string
     {
         $lines = explode("\n", $text);
 
@@ -1011,12 +780,8 @@ class Utils
      * length 6 with lowercase alphanumeric, except o, 0, l and 1. `false`
      * should be used when generating password that will be printed and handed
      * out. In other cases, use `true`.
-     *
-     * @param bool $moreEntropy
-     *
-     * @return string
      */
-    public static function generatePassword(bool $moreEntropy = true) : string
+    public static function generatePassword(bool $moreEntropy = true): string
     {
         if ($moreEntropy) {
             $chars = array_merge(
@@ -1033,7 +798,7 @@ class Utils
         $max_chars = count($chars) - 1;
 
         $rand_str = '';
-        for ($i = 0; $i < ($moreEntropy ? 16 : 6); ++$i) {
+        for ($i = 0; $i < ($moreEntropy ? 32 : 12); ++$i) {
             $rand_str .= $chars[random_int(0, $max_chars)];
         }
 
@@ -1043,42 +808,43 @@ class Utils
     /**
      * Convert size value as returned by ini_get to bytes.
      */
-    public static function phpiniToBytes(string $size_str) : int
+    public static function phpiniToBytes(string $size_str): int
     {
         switch (substr($size_str, -1)) {
-            case 'M': case 'm': return (int)$size_str * 1048576;
-            case 'K': case 'k': return (int)$size_str * 1024;
-            case 'G': case 'g': return (int)$size_str * 1073741824;
-            default: return (int)$size_str;
+            case 'M':
+            case 'm':
+                return (int)$size_str * 1048576;
+            case 'K':
+            case 'k':
+                return (int)$size_str * 1024;
+            case 'G':
+            case 'g':
+                return (int)$size_str * 1073741824;
+            default:
+                return (int)$size_str;
         }
     }
 
     /**
-     * Return the table name for the given entity
+     * Return the table name for the given entity.
      * @param $entity
-     *
-     * @return string
      */
-    public static function tableForEntity($entity) : string
+    public static function tableForEntity($entity): string
     {
         $class        = get_class($entity);
         $parts        = explode('\\', $class);
         $entityType   = $parts[count($parts) - 1];
-        return Inflector::tableize($entityType);
+        $inflector    = InflectorFactory::create()->build();
+        return $inflector->tableize($entityType);
     }
 
-    /**
-     * @param string $content
-     * @param string $filename
-     * @return StreamedResponse
-     */
-    public static function streamAsBinaryFile(string $content, string $filename): StreamedResponse
+    public static function streamAsBinaryFile(string $content, string $filename, string $type = 'octet-stream'): StreamedResponse
     {
         $response = new StreamedResponse();
         $response->setCallback(function () use ($content) {
             echo $content;
         });
-        $response->headers->set('Content-Type', 'application/octet-stream');
+        $response->headers->set('Content-Type', 'application/' . $type);
         $response->headers->set('Content-Disposition', 'attachment; filename="' . $filename . '"');
         $response->headers->set('Content-Length', strlen($content));
         $response->headers->set('Content-Transfer-Encoding', 'binary');
@@ -1088,11 +854,7 @@ class Utils
     }
 
     /**
-     * Convert the given string to a field that is safe to use in a Tab Separated Values file
-     *
-     * @param string $field
-     *
-     * @return string
+     * Convert the given string to a field that is safe to use in a Tab Separated Values file.
      */
     public static function toTsvField(string $field) : string
     {
@@ -1104,14 +866,22 @@ class Utils
     }
 
     /**
-     * Split a line from a Tab Separated Values file into fields
-     *
-     * @param string $line
-     *
-     * @return array
+     * Split a line from a Tab Separated Values file into fields.
      */
-    public static function parseTsvLine(string $line) : array
+    public static function parseTsvLine(string $line): array
     {
         return array_map('stripcslashes', explode("\t", rtrim($line, "\r\n")));
+    }
+
+    /**
+     * Reindex the given array by applying the callback to each item.
+     */
+    public static function reindex(array $array, callable $callback): array
+    {
+        $reindexed = [];
+        array_walk($array, function ($item, $key) use (&$reindexed, $callback) {
+            $reindexed[$callback($item, $key)] = $item;
+        });
+        return $reindexed;
     }
 }

@@ -23,7 +23,7 @@ install-domserver:
 # This must be done first to install with the rest.
 	$(MAKE) copy-bundle-assets
 	$(INSTALL_DIR) $(DESTDIR)$(domserver_webappdir);
-	for d in bin config public src templates tests ; do \
+	for d in bin config migrations public src templates tests ; do \
 		$(call install_tree,$(DESTDIR)$(domserver_webappdir),$$d) ; \
 	done
 # Change webapp/public/doc symlink
@@ -39,10 +39,6 @@ install-domserver:
 		fi \
 	done
 	$(INSTALL_DATA) -t $(DESTDIR)$(domserver_webappdir) phpunit.xml.dist .env
-
-install-docs:
-	$(INSTALL_DATA) -T public/images/countries/README    $(DESTDIR)$(domjudge_docdir)/README.country_flags
-	$(INSTALL_DATA) -T public/images/countries/codes.txt $(DESTDIR)$(domjudge_docdir)/country_codes.txt
 
 maintainer-clean-l:
 	-for d in cache log ; do \

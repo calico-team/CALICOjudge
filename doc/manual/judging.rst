@@ -90,10 +90,12 @@ overshoot` is then used to calculate a 'hard timelimit'.
 This overshoot can be specified in terms of an absolute and relative
 margin.
 
-The `soft:hard` timelimit pair is passed to `runguard` as both
-wall clock and CPU limit. This is used by `runguard` when reporting
-whether the soft, actual timelimit has been surpassed. The submitted
-program gets killed when either the hard wall clock or CPU time has passed.
+The `soft:hard` timelimit pair is passed to `runguard`, the wrapper
+program that applies restrictions to submissions when they are being
+run, as both wall clock and CPU limit. This is used by `runguard` when
+reporting whether the soft, actual timelimit has been surpassed. The
+submitted program gets killed when either the hard wall clock or CPU
+time has passed.
 
 .. _judging-consistency:
 
@@ -140,48 +142,25 @@ individual testcase results will be the overall submission result:
 the highest priority one. In case of a tie, the first occurring testcase
 result with highest priority is returned.
 
-Judgehost restrictions
-----------------------
-It is possible to dedicate certain judgehosts only for certain languages,
-problems or contests; or a combination thereof. To set this up, configure
-the desired restriction pattern under *Judgehost restrictions* from the
-main menu. For example, you select contest 1 and language Java.
-Then, you can edit all judgehosts and apply the newly created restriction
-to any of them. The judgehosts with this restriction will only pick up
-submissions that are in contest 1 *and* are submitted in Java. Submissions
-for other languages, or in other contests, will need to be processed by
-other judgehosts.
-
-When adding restrictions, take care that there must remain judgehosts
-available to judge every active problem, language and contest.
-The *Configuration checker* will perform a check for this.
-
-A special restriction is turning off *Allow rejudge on same judgehost*.
-This defaults to Yes (so a rejudge of a submission can happen on any
-judgehost), but you can add a judgehost restriction with this setting
-to No. This can be used to test timings on judgehosts by configuring
-all judgehosts with this restriction and then rejudging a set of submissions
-as many times as there are judgehosts. This will lead to the situation that
-each judgehosts has judged every submission exactly once.
-
 Disk space and cleanup
 ----------------------
 The judgehost caches testcase and executable data and stores various
 logs, compiled submissions, etc. on disk. Depending on the amount of
 disk space available and size and length of the contest, you may run
-out of free space. The configuration setting ``diskspace_error`` will
-make a judgehost abort before it actually crashes when running out of
-space.
+out of free space. By default, the judgehost will start cleaning up
+old judging data until there's at least the amount of space free as
+that is indicated in the configuration setting ``diskspace_error``.
 
-When you run out of space, the script ``dj_judgehost_cleanup`` can be
-used to remove some unnecessary files. It allows you to remove cache
-and judging data. The judging data is generated and required during
-judging, but afterwards can be safely removed if you don't need it
-anymore for debugging or auditing.
+Do disable automatic cleanup, start the judgedaemon with the
+``--diskspace-error`` commandline parameter. When that is set, the
+judgehost will send back an internal error and disable itself until
+it has been manually cleaned up. The script ``dj_judgehost_cleanup``
+can be used for this task.
 
-Finally, if a judgedaemon crashes, this can leave stale bind-mounts to
-the chroot environment. Run ``dj_judgehost_cleanup mounts`` to clean
-these up. Run ``dj_judgehost_cleanup help`` for a list of all
+If for some reason a judgedaemon crashes, it can leave stale
+bind-mounts to the chroot environment. Run
+``dj_judgehost_cleanup mounts`` to clean these up. Run
+``dj_judgehost_cleanup help`` for a list of all
 commands.
 
 Solutions to common issues
@@ -236,3 +215,14 @@ create dedicated a user `domjudge` under which to install and run everything.
   be used to run normal DOMjudge processes; this user is only for
   internal use.
 
+'found processes still running ... apport'
+``````````````````````````````````````````
+
+If you see error messages of the form::
+
+  error: found processes still running as 'domjudge-run', check manually:
+  2342 apport
+
+Then you still have ``apport`` installed and running. This error message occurs when
+judging submissions that trigger a segmentation fault. Disable or uninstall the apport
+daemon on all judgehosts.

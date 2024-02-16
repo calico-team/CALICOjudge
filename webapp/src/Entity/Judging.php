@@ -6,16 +6,18 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use JMS\Serializer\Annotation as Serializer;
+use OpenApi\Annotations as OA;
+use Ramsey\Uuid\Uuid;
 
 /**
- * Result of judging a submission
+ * Result of judging a submission.
+ *
  * @ORM\Entity()
  * @ORM\Table(
  *     name="judging",
- *     options={"collate"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Result of judging a submission"},
+ *     options={"collation"="utf8mb4_unicode_ci", "charset"="utf8mb4", "comment"="Result of judging a submission"},
  *     indexes={
  *         @ORM\Index(name="submitid", columns={"submitid"}),
- *         @ORM\Index(name="judgehost", columns={"judgehost"}),
  *         @ORM\Index(name="cid", columns={"cid"}),
  *         @ORM\Index(name="rejudgingid", columns={"rejudgingid"}),
  *         @ORM\Index(name="prevjudgingid", columns={"prevjudgingid"})
@@ -23,13 +25,10 @@ use JMS\Serializer\Annotation as Serializer;
  */
 class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterface
 {
-    // constants for results
     const RESULT_CORRECT = 'correct';
     const RESULT_COMPILER_ERROR = 'compiler-error';
 
     /**
-     * @var int
-     *
      * @ORM\Id
      * @ORM\GeneratedValue(strategy="AUTO")
      * @ORM\Column(type="integer", name="judgingid", length=4,
@@ -37,215 +36,183 @@ class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterfa
      * @Serializer\SerializedName("id")
      * @Serializer\Type("string")
      */
-    protected $judgingid;
+    protected int $judgingid;
 
     /**
-     * @var int
-     *
-     * @ORM\Column(type="integer", name="cid", length=4,
-     *     options={"comment"="Contest ID","unsigned"=true,"default"="0"},
-     *     nullable=false)
-     * @Serializer\Exclude()
-     */
-    private $cid;
-
-    /**
-     * @var int
-     *
-     * @ORM\Column(type="integer", name="submitid", length=4,
-     *     options={"comment"="Submission ID being judged","unsigned"=true},
-     *     nullable=false)
-     * @Serializer\SerializedName("submission_id")
-     * @Serializer\Type("string")
-     */
-    private $submitid;
-
-    /**
-     * @var double
+     * @var double|string|null
      * @ORM\Column(type="decimal", precision=32, scale=9, name="starttime",
      *     options={"comment"="Time judging started", "unsigned"=true},
-     *     nullable=false)
+     *     nullable=true)
      * @Serializer\Exclude()
      */
     private $starttime;
 
     /**
-     * @var double
+     * @var double|string|null
      * @ORM\Column(type="decimal", precision=32, scale=9, name="endtime",
      *     options={"comment"="Time judging ended, null = still busy",
-     *              "unsigned"=true,"default"="NULL"},
+     *              "unsigned"=true},
      *     nullable=true)
      * @Serializer\Exclude()
+     * @OA\Property(nullable=true)
      */
     private $endtime;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="result", length=32,
-     *     options={"comment"="Result string as defined in config.php",
-     *              "default"="NULL"},
+     *     options={"comment"="Result string as defined in config.php"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $result;
+    private ?string $result;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="verified",
      *     options={"comment"="Result verified by jury member?",
      *              "default"="0"},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $verified = false;
+    private bool $verified = false;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="jury_member", length=255,
-     *     options={"comment"="Name of jury member who verified this",
-     *              "default"="NULL"},
+     *     options={"comment"="Name of jury member who verified this"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $jury_member;
+    private ?string $jury_member;
 
     /**
-     * @var string
      * @ORM\Column(type="string", name="verify_comment", length=255,
-     *     options={"comment"="Optional additional information provided by the verifier",
-     *              "default"="NULL"},
+     *     options={"comment"="Optional additional information provided by the verifier"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $verify_comment;
+    private ?string $verify_comment;
 
     /**
-     * @var boolean
      * @ORM\Column(type="boolean", name="valid",
      *     options={"comment"="Old judging is marked as invalid when rejudging",
      *              "default"="1"},
      *     nullable=false)
+     * @Serializer\Groups({"Nonstrict"})
      */
-    private $valid = true;
+    private bool $valid = true;
 
     /**
-     * @var resource
+     * @var resource|null
      * @ORM\Column(type="blob", name="output_compile",
-     *     options={"comment"="Output of the compiling the program",
-     *              "default"="NULL"},
+     *     options={"comment"="Output of the compiling the program"},
      *     nullable=true)
      * @Serializer\Exclude()
      */
     private $output_compile;
 
     /**
+     * @ORM\Column(type="blobtext", length=4294967295, name="metadata",
+     *     options={"comment"="Compilation metadata"},
+     *     nullable=true)
      * @Serializer\Exclude()
      */
-    private $output_compile_as_string = null;
+    private ?string $compile_metadata;
 
     /**
-     * @var boolean
+     * @Serializer\Exclude()
+     */
+    private ?string $output_compile_as_string = null;
+
+    /**
      * @ORM\Column(type="boolean", name="seen",
      *     options={"comment"="Whether the team has seen this judging",
      *              "default"="0"},
      *     nullable=false)
      * @Serializer\Exclude()
      */
-    private $seen = false;
+    private bool $seen = false;
 
     /**
-     * @var int
-     *
-     * @ORM\Column(type="integer", name="rejudgingid", length=4,
-     *     options={"comment"="Rejudging ID (if rejudge)","unsigned"=true,
-     *              "default"="NULL"},
-     *     nullable=true)
-     * @Serializer\Exclude()
-     */
-    private $rejudgingid;
-
-    /**
-     * @var int
-     *
-     * @ORM\Column(type="integer", name="prevjudgingid",
-     *     options={"comment"="Previous valid judging (if rejudge)",
-     *              "unsigned"=true,"default"="NULL"},
-     *     nullable=true)
-     * @Serializer\Exclude()
-     */
-    private $prevjudgingid;
-
-    /**
-     * @var string
-     * @ORM\Column(type="string", name="judgehost", length=64,
-     *     options={"comment"="Judgehost that performed the judging"},
+     * @ORM\Column(type="boolean", name="judge_completely",
+     *     options={"comment"="Explicitly requested to be judged completely.",
+     *              "default"="0"},
      *     nullable=false)
-     * @Serializer\Expose(if="context.getAttribute('domjudge_service').checkrole('jury')")
-     * @Serializer\SerializedName("judgehost")
+     * @Serializer\Exclude()
      */
-    private $judgehost_name;
+    private bool $judgeCompletely = false;
+
+    /**
+     * @ORM\Column(type="string", name="uuid",
+     *     options={"comment"="UUID, to make caching of compilation results safe."},
+     *     nullable=false)
+     * @Serializer\Exclude()
+     */
+    private string $uuid;
+
 
     /**
      * @ORM\ManyToOne(targetEntity="Contest")
      * @ORM\JoinColumn(name="cid", referencedColumnName="cid", onDelete="CASCADE")
      * @Serializer\Exclude()
      */
-    private $contest;
+    private ?Contest $contest;
 
     /**
      * @ORM\ManyToOne(targetEntity="Submission", inversedBy="judgings")
      * @ORM\JoinColumn(name="submitid", referencedColumnName="submitid", onDelete="CASCADE")
      * @Serializer\Exclude()
      */
-    private $submission;
+    private Submission $submission;
 
-    /**
-     * @ORM\ManyToOne(targetEntity="Judgehost", inversedBy="judgings")
-     * @ORM\JoinColumn(name="judgehost", referencedColumnName="hostname")
-     * @Serializer\Exclude()
-     */
-    private $judgehost;
     /**
      * rejudgings have one parent judging
      * @ORM\ManyToOne(targetEntity="Rejudging", inversedBy="judgings")
      * @ORM\JoinColumn(name="rejudgingid", referencedColumnName="rejudgingid", onDelete="SET NULL")
      * @Serializer\Exclude()
      */
-    private $rejudging;
+    private ?Rejudging $rejudging;
 
     /**
-     * rejudgings have one parent judging
+     * Rejudgings have one parent judging.
      * @ORM\ManyToOne(targetEntity="Judging")
      * @ORM\JoinColumn(name="prevjudgingid", referencedColumnName="judgingid", onDelete="SET NULL")
      * @Serializer\Exclude()
      */
-    private $original_judging;
+    private ?Judging $original_judging;
 
     /**
      * @ORM\OneToMany(targetEntity="JudgingRun", mappedBy="judging")
      * @Serializer\Exclude()
      */
-    private $runs;
-
+    private Collection $runs;
 
     /**
-     * Get the max runtime for this judging
-     * @return float
+     * @ORM\OneToMany(targetEntity="DebugPackage", mappedBy="judging")
+     * @Serializer\Exclude()
      */
-    public function getMaxRuntime()
+    private Collection $debug_packages;
+
+    /**
+     * Rejudgings have one parent judging.
+     * @ORM\ManyToOne(targetEntity="InternalError", inversedBy="affectedJudgings")
+     * @ORM\JoinColumn(name="errorid", referencedColumnName="errorid", onDelete="SET NULL")
+     * @Serializer\Exclude()
+     */
+    private ?InternalError $internalError;
+
+    public function getMaxRuntime(): ?float
     {
+        if ($this->runs->isEmpty()) {
+            return null;
+        }
         $max = 0;
         foreach ($this->runs as $run) {
-            $max = max($run->getRuntime(), $max);
+            // JudgingRun::getRuntime can be null if it didn't run. We exclude these for the max runtime.
+            $max = max($run->getRuntime() ?? 0, $max);
         }
         return $max;
     }
 
-    /**
-     * Get the sum runtime for this judging
-     * @return float
-     */
-    public function getSumRuntime()
+    public function getSumRuntime(): float
     {
         $sum = 0;
         foreach ($this->runs as $run) {
@@ -254,301 +221,145 @@ class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterfa
         return $sum;
     }
 
-    /**
-     * Get judgingid
-     *
-     * @return integer
-     */
-    public function getJudgingid()
+    public function getJudgingid(): int
     {
         return $this->judgingid;
     }
 
-    /**
-     * Set cid
-     *
-     * @param integer $cid
-     *
-     * @return Judging
-     */
-    public function setCid($cid)
-    {
-        $this->cid = $cid;
-
-        return $this;
-    }
-
-    /**
-     * Get cid
-     *
-     * @return integer
-     */
-    public function getCid()
-    {
-        return $this->cid;
-    }
-
-    /**
-     * Set submitid
-     *
-     * @param integer $submitid
-     *
-     * @return Judging
-     */
-    public function setSubmitid($submitid)
-    {
-        $this->submitid = $submitid;
-
-        return $this;
-    }
-
-    /**
-     * Get submitid
-     *
-     * @return integer
-     */
-    public function getSubmitid()
-    {
-        return $this->submitid;
-    }
-
-    /**
-     * Set starttime
-     *
-     * @param string $starttime
-     *
-     * @return Judging
-     */
-    public function setStarttime($starttime)
+    /** @param string|float $starttime */
+    public function setStarttime($starttime): Judging
     {
         $this->starttime = $starttime;
-
         return $this;
     }
 
-    /**
-     * Get starttime
-     *
-     * @return string
-     */
+    /** @return string|float|null */
     public function getStarttime()
     {
         return $this->starttime;
     }
 
     /**
-     * Get the absolute start time for this judging
-     *
-     * @return string
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("start_time")
      * @Serializer\Type("string")
+     * @OA\Property(nullable=true)
      */
-    public function getAbsoluteStartTime()
+    public function getAbsoluteStartTime(): ?string
     {
         return Utils::absTime($this->getStarttime());
     }
 
     /**
-     * Get the relative start time for this judging
-     *
-     * @return string
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("start_contest_time")
      * @Serializer\Type("string")
      */
-    public function getRelativeStartTime()
+    public function getRelativeStartTime(): string
     {
         return Utils::relTime($this->getStarttime() - $this->getContest()->getStarttime());
     }
 
-    /**
-     * Set endtime
-     *
-     * @param string $endtime
-     *
-     * @return Judging
-     */
-    public function setEndtime($endtime)
+    /** @param string|float $endtime */
+    public function setEndtime($endtime): Judging
     {
         $this->endtime = $endtime;
-
         return $this;
     }
 
-    /**
-     * Get endtime
-     *
-     * @return string
-     */
+    /** @return string|float */
     public function getEndtime()
     {
         return $this->endtime;
     }
 
     /**
-     * Get the absolute end time for this judging
-     *
-     * @return string|null
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("end_time")
      * @Serializer\Type("string")
+     * @OA\Property(nullable=true)
      */
-    public function getAbsoluteEndTime()
+    public function getAbsoluteEndTime(): ?string
     {
         return $this->getEndtime() ? Utils::absTime($this->getEndtime()) : null;
     }
 
     /**
-     * Get the relative end time for this judging
-     *
-     * @return string|null
      * @Serializer\VirtualProperty()
      * @Serializer\SerializedName("end_contest_time")
      * @Serializer\Type("string")
+     * @OA\Property(nullable=true)
      */
-    public function getRelativeEndTime()
+    public function getRelativeEndTime(): ?string
     {
         return $this->getEndtime() ? Utils::relTime($this->getEndtime() - $this->getContest()->getStarttime()) : null;
     }
 
-    /**
-     * Set result
-     *
-     * @param string $result
-     *
-     * @return Judging
-     */
-    public function setResult($result)
+    public function setResult(?string $result): Judging
     {
         $this->result = $result;
-
         return $this;
     }
 
-    /**
-     * Get result
-     *
-     * @return string
-     */
-    public function getResult()
+    public function getResult(): ?string
     {
         return $this->result;
     }
 
-    /**
-     * Set verified
-     *
-     * @param boolean $verified
-     *
-     * @return Judging
-     */
-    public function setVerified($verified)
+    public function setVerified(bool $verified): Judging
     {
         $this->verified = $verified;
-
         return $this;
     }
 
-    /**
-     * Get verified
-     *
-     * @return boolean
-     */
-    public function getVerified()
+    public function getVerified(): bool
     {
         return $this->verified;
     }
 
-    /**
-     * Set juryMember
-     *
-     * @param string $juryMember
-     *
-     * @return Judging
-     */
-    public function setJuryMember($juryMember)
+    public function setJuryMember(?string $juryMember): Judging
     {
         $this->jury_member = $juryMember;
-
         return $this;
     }
 
-    /**
-     * Get juryMember
-     *
-     * @return string
-     */
-    public function getJuryMember()
+    public function getJuryMember(): ?string
     {
         return $this->jury_member;
     }
 
-    /**
-     * Set verifyComment
-     *
-     * @param string $verifyComment
-     *
-     * @return Judging
-     */
-    public function setVerifyComment($verifyComment)
+    public function setVerifyComment(?string $verifyComment): Judging
     {
         $this->verify_comment = $verifyComment;
-
         return $this;
     }
 
-    /**
-     * Get verifyComment
-     *
-     * @return string
-     */
-    public function getVerifyComment()
+    public function getVerifyComment(): ?string
     {
         return $this->verify_comment;
     }
 
-    /**
-     * Set valid
-     *
-     * @param boolean $valid
-     *
-     * @return Judging
-     */
-    public function setValid($valid)
+    public function setValid(bool $valid): Judging
     {
         $this->valid = $valid;
-
         return $this;
     }
 
-    /**
-     * Get valid
-     *
-     * @return boolean
-     */
-    public function getValid()
+    public function getValid(): bool
     {
         return $this->valid;
     }
 
     /**
-     * Set outputCompile
-     *
      * @param resource|string $outputCompile
-     *
-     * @return Judging
      */
-    public function setOutputCompile($outputCompile)
+    public function setOutputCompile($outputCompile): Judging
     {
         $this->output_compile = $outputCompile;
-
         return $this;
     }
 
     /**
-     * Get outputCompile
-     *
      * @return resource|string|null
      */
     public function getOutputCompile(bool $asString = false)
@@ -562,269 +373,126 @@ class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterfa
         return $this->output_compile;
     }
 
-    /**
-     * Set seen
-     *
-     * @param boolean $seen
-     *
-     * @return Judging
-     */
-    public function setSeen($seen)
+    public function setSeen(bool $seen): Judging
     {
         $this->seen = $seen;
-
         return $this;
     }
 
-    /**
-     * Get seen
-     *
-     * @return boolean
-     */
-    public function getSeen()
+    public function getSeen(): bool
     {
         return $this->seen;
     }
 
-    /**
-     * Set rejudgingid
-     *
-     * @param integer $rejudgingid
-     *
-     * @return Judging
-     */
-    public function setRejudgingid($rejudgingid)
+    public function setJudgeCompletely(bool $judgeCompletely): Judging
     {
-        $this->rejudgingid = $rejudgingid;
-
+        $this->judgeCompletely = $judgeCompletely;
         return $this;
     }
 
-    /**
-     * Get rejudgingid
-     *
-     * @return integer
-     */
-    public function getRejudgingid()
+    public function getJudgeCompletely(): bool
     {
-        return $this->rejudgingid;
+        return $this->judgeCompletely;
     }
 
-    /**
-     * Set prevjudgingid
-     *
-     * @param integer $prevjudgingid
-     *
-     * @return Judging
-     */
-    public function setPrevjudgingid($prevjudgingid)
-    {
-        $this->prevjudgingid = $prevjudgingid;
-
-        return $this;
-    }
-
-    /**
-     * Get prevjudgingid
-     *
-     * @return integer
-     */
-    public function getPrevjudgingid()
-    {
-        return $this->prevjudgingid;
-    }
-
-    /**
-     * Get judgehost name
-     *
-     * @param string $judgehost_name
-     *
-     * @return Judging
-     */
-    public function setJudgehostName(string $judgehost_name)
-    {
-        $this->judgehost_name = $judgehost_name;
-
-        return $this;
-    }
-
-    /**
-     * Set judgehost name
-     *
-     * @return string
-     */
-    public function getJudgehostName(): string
-    {
-        return $this->judgehost_name;
-    }
-
-    /**
-     * Set submission
-     *
-     * @param \App\Entity\Submission $submission
-     *
-     * @return Judging
-     */
-    public function setSubmission(\App\Entity\Submission $submission = null)
+    public function setSubmission(?Submission $submission = null): Judging
     {
         $this->submission = $submission;
-
         return $this;
     }
 
-    /**
-     * Get submission
-     *
-     * @return \App\Entity\Submission
-     */
-    public function getSubmission()
+    public function getSubmission(): Submission
     {
         return $this->submission;
     }
 
     /**
-     * Set contest
-     *
-     * @param \App\Entity\Contest $contest
-     *
-     * @return Judging
+     * @Serializer\VirtualProperty
+     * @Serializer\SerializedName("submission_id")
+     * @Serializer\Type("string")
      */
-    public function setContest(\App\Entity\Contest $contest = null)
+    public function getSubmissionId(): int
+    {
+        return $this->getSubmission()->getSubmitid();
+    }
+
+    public function setContest(?Contest $contest = null): Judging
     {
         $this->contest = $contest;
-
         return $this;
     }
 
-    /**
-     * Get contest
-     *
-     * @return \App\Entity\Contest
-     */
-    public function getContest()
+    public function getContest(): ?Contest
     {
         return $this->contest;
     }
 
-    /**
-     * Set rejudging
-     *
-     * @param \App\Entity\Rejudging $rejudging
-     *
-     * @return Judging
-     */
-    public function setRejudging(\App\Entity\Rejudging $rejudging = null)
+    public function setRejudging(?Rejudging $rejudging = null): Judging
     {
         $this->rejudging = $rejudging;
-
         return $this;
     }
 
-    /**
-     * Get rejudging
-     *
-     * @return \App\Entity\Rejudging
-     */
-    public function getRejudging()
+    public function getRejudging(): ?Rejudging
     {
         return $this->rejudging;
     }
 
-    /**
-     * Set originalJudging
-     *
-     * @param \App\Entity\Judging $originalJudging
-     *
-     * @return Judging
-     */
-    public function setOriginalJudging(\App\Entity\Judging $originalJudging = null)
+    public function setOriginalJudging(?Judging $originalJudging = null): Judging
     {
         $this->original_judging = $originalJudging;
-
         return $this;
     }
 
-    /**
-     * Get originalJudging
-     *
-     * @return \App\Entity\Judging
-     */
-    public function getOriginalJudging()
+    public function getOriginalJudging(): ?Judging
     {
         return $this->original_judging;
     }
 
-    /**
-     * Set judgehost
-     *
-     * @param \App\Entity\Judgehost $judgehost
-     *
-     * @return Judging
-     */
-    public function setJudgehost(\App\Entity\Judgehost $judgehost = null)
-    {
-        $this->judgehost = $judgehost;
-
-        return $this;
-    }
-
-    /**
-     * Get judgehost
-     *
-     * @return \App\Entity\Judgehost
-     */
-    public function getJudgehost()
-    {
-        return $this->judgehost;
-    }
-    /**
-     * Constructor
-     */
     public function __construct()
     {
-        $this->runs = new \Doctrine\Common\Collections\ArrayCollection();
+        $this->runs = new ArrayCollection();
+        $this->debug_packages = new ArrayCollection();
+        $this->uuid = Uuid::uuid4()->toString();
     }
 
-    /**
-     * Add run
-     *
-     * @param \App\Entity\JudgingRun $run
-     *
-     * @return Judging
-     */
-    public function addRun(\App\Entity\JudgingRun $run)
+    public function getUuid(): string
+    {
+        return $this->uuid;
+    }
+
+    public function addRun(JudgingRun $run): Judging
     {
         $this->runs[] = $run;
-
         return $this;
     }
 
-    /**
-     * Remove run
-     *
-     * @param \App\Entity\JudgingRun $run
-     */
-    public function removeRun(\App\Entity\JudgingRun $run)
+    public function removeRun(JudgingRun $run): void
     {
         $this->runs->removeElement($run);
     }
 
-    /**
-     * Get runs
-     *
-     * @return \Doctrine\Common\Collections\Collection
-     */
-    public function getRuns()
+    public function getRuns(): Collection
     {
         return $this->runs;
+    }
+
+    public function setInternalError(?InternalError $internalError = null): Judging
+    {
+        $this->internalError = $internalError;
+        return $this;
+    }
+
+    public function getInternalError(): ?InternalError
+    {
+        return $this->internalError;
     }
 
     /**
      * Get the entities to check for external ID's while serializing.
      *
      * This method should return an array with as keys the JSON field names and as values the actual entity
-     * objects that the SetExternalIdVisitor should check for applicable external ID's
-     * @return array
+     * objects that the SetExternalIdVisitor should check for applicable external ID's.
      */
     public function getExternalRelationships(): array
     {
@@ -832,12 +500,19 @@ class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterfa
     }
 
     /**
-     * Check whether this judging is for an aborted judging
-     * @return bool
+     * Check whether this judging has started judging
      */
-    public function isAborted()
+    public function isStarted(): bool
     {
-        // This logic has been copied from putSubmissions()
+        return $this->getStarttime() !== null;
+    }
+
+    /**
+     * Check whether this judging is for an aborted judging.
+     */
+    public function isAborted(): bool
+    {
+        // This logic has been copied from putSubmissions().
         return $this->getEndtime() === null && !$this->getValid() &&
             (!$this->getRejudging() || !$this->getRejudging()->getValid());
     }
@@ -845,10 +520,40 @@ class Judging extends BaseApiEntity implements ExternalRelationshipEntityInterfa
     /**
      * Check whether this judging is still busy while the final result is already known,
      * e.g. with non-lazy evaluation.
-     * @return bool
      */
-    public function isStillBusy()
+    public function isStillBusy(): bool
     {
         return !empty($this->getResult()) && empty($this->getEndtime()) && !$this->isAborted();
+    }
+
+    public function getJudgehosts(): array
+    {
+        $hostnames = [];
+        /** @var JudgingRun $run */
+        foreach ($this->getRuns() as $run) {
+            if ($run->getJudgeTask() === null || $run->getJudgeTask()->getJudgehost() === null) {
+                continue;
+            }
+            $hostnames[] = $run->getJudgeTask()->getJudgehost()->getHostname();
+        }
+        $hostnames = array_unique($hostnames);
+        sort($hostnames);
+        return $hostnames;
+    }
+
+    public function getDebugPackages(): Collection
+    {
+        return $this->debug_packages;
+    }
+
+    public function getCompileMetadata(): ?string
+    {
+        return $this->compile_metadata;
+    }
+
+    public function setCompileMetadata($compile_metadata): self
+    {
+        $this->compile_metadata = $compile_metadata;
+        return $this;
     }
 }

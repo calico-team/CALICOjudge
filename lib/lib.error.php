@@ -13,11 +13,8 @@ if (! defined('SCRIPT_ID')) {
 $verbose  = LOG_NOTICE;
 $loglevel = LOG_DEBUG;
 
-// Is this the webinterface or commandline?
-define('IS_WEB', isset($_SERVER['REMOTE_ADDR']));
-
 // Open standard error:
-if (! IS_WEB && ! defined('STDERR')) {
+if (!defined('STDERR')) {
     define('STDERR', fopen('php://stderr', 'w'));
 }
 
@@ -49,33 +46,17 @@ function logmsg(int $msglevel, string $string)
 {
     global $verbose, $loglevel;
 
-    // Trim $string to reasonable length to prevent server/browser crashes:
+    // Trim $string to reasonable length
     $string = substr($string, 0, 10000);
 
     $msec = sprintf("%03d", (int)(explode(' ', microtime())[0]*1000));
-    $stamp = "[" . strftime("%b %d %H:%M:%S") . ".$msec] " . SCRIPT_ID .
+    $stamp = "[" . date('M d H:i:s') . ".$msec] " . SCRIPT_ID .
         (function_exists('posix_getpid') ? "[" . posix_getpid() . "]" : "") .
         ": ";
 
     if ($msglevel <= $verbose) {
-        // if this is the webinterface, print it to stdout, else to stderr
-        if (IS_WEB) {
-            $msg = htmlspecialchars($string);
-            // if this is the API, do not add HTML formatting and send HTTP status code
-            // string 'ERROR' parsed by submit client, don't modify!
-            if ($msglevel == LOG_ERR) {
-                echo "<fieldset class=\"error\"><legend>ERROR</legend> " .
-                     $msg . "</fieldset><!-- trigger HTML validator error: --><b>\n";
-            } elseif ($msglevel == LOG_WARNING) {
-                echo "<fieldset class=\"warning\"><legend>Warning</legend> " .
-                    $msg . "</fieldset><!-- trigger HTML validator error: --><b>\n";
-            } else {
-                echo "<p>" . $msg . "</p>\n";
-            }
-        } else {
-            fwrite(STDERR, $stamp . $string . "\n");
-            fflush(STDERR);
-        }
+        fwrite(STDERR, $stamp . $string . "\n");
+        fflush(STDERR);
     }
     if ($msglevel <= $loglevel) {
         if (defined('STDLOG')) {
@@ -83,7 +64,11 @@ function logmsg(int $msglevel, string $string)
             fflush(STDLOG);
         }
         if (defined('SYSLOG')) {
-            syslog($msglevel, $string . "\n");
+            // Remove the ANSI escape characters,
+            // When logging direct to the terminal the checkmark should be green, this
+            // does not work in log so remove this specific control char.
+            // This removes both the start and the reset of the color.
+            syslog($msglevel, preg_replace('# ?\\x1b\[[0-9];?[0-9]*m#', '', $string) . "\n");
         }
     }
 }
@@ -114,13 +99,7 @@ function debug()
         return;
     }
 
-    if (IS_WEB) {
-        echo "<pre>\n";
-    }
     call_user_func_array('var_dump', func_get_args());
-    if (IS_WEB) {
-        echo "</pre>\n";
-    }
 }
 
 /**

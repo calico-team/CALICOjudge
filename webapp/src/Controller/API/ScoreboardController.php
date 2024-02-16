@@ -10,41 +10,29 @@ use App\Service\DOMJudgeService;
 use App\Service\EventLogService;
 use App\Service\ScoreboardService;
 use App\Utils\Scoreboard\Filter;
-use App\Utils\Scoreboard\ScoreboardMatrixItem;
 use App\Utils\Utils;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\NonUniqueResultException;
 use Doctrine\ORM\QueryBuilder;
+use Exception;
 use FOS\RestBundle\Controller\Annotations as Rest;
-use Swagger\Annotations as SWG;
+use OpenApi\Annotations as OA;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
-use Symfony\Component\Intl\Exception\NotImplementedException;
 
 /**
- * @Rest\Route("/api/v4/contests/{cid}/scoreboard", defaults={ "_format" = "json" })
- * @Rest\Prefix("/api/contests/{cid}/scoreboard")
- * @Rest\NamePrefix("scoreboard_")
- * @SWG\Tag(name="Scoreboard")
- * @SWG\Parameter(ref="#/parameters/cid")
- * @SWG\Response(response="404", ref="#/definitions/NotFound")
- * @SWG\Response(response="401", ref="#/definitions/Unauthorized")
+ * @Rest\Route("/contests/{cid}/scoreboard")
+ * @OA\Tag(name="Scoreboard")
+ * @OA\Parameter(ref="#/components/parameters/cid")
+ * @OA\Parameter(ref="#/components/parameters/strict")
+ * @OA\Response(response="400", ref="#/components/responses/InvalidResponse")
+ * @OA\Response(response="401", ref="#/components/responses/Unauthenticated")
+ * @OA\Response(response="403", ref="#/components/responses/Unauthorized")
+ * @OA\Response(response="404", ref="#/components/responses/NotFound")
  */
 class ScoreboardController extends AbstractRestController
 {
-    /**
-     * @var ScoreboardService
-     */
-    protected $scoreboardService;
+    protected ScoreboardService $scoreboardService;
 
-    /**
-     * ScoreboardController constructor.
-     *
-     * @param EntityManagerInterface $entityManager
-     * @param DOMJudgeService        $DOMJudgeService
-     * @param ConfigurationService   $config
-     * @param EventLogService        $eventLogService
-     * @param ScoreboardService      $scoreboardService
-     */
     public function __construct(
         EntityManagerInterface $entityManager,
         DOMJudgeService $DOMJudgeService,
@@ -57,55 +45,52 @@ class ScoreboardController extends AbstractRestController
     }
 
     /**
-     * Get the scoreboard for this contest
-     * @param Request $request
-     * @return array
+     * Get the scoreboard for this contest.
      * @Rest\Get("")
-     * @SWG\Response(
+     * @OA\Response(
      *     response="200",
      *     description="Returns the scoreboard",
-     *     @SWG\Schema(ref="#/definitions/Scoreboard")
+     *     @OA\JsonContent(ref="#/components/schemas/Scoreboard")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="allteams",
      *     in="query",
-     *     type="boolean",
-     *     description="Also show invisble teams. Requires jury privileges"
+     *     description="Also show invisible teams. Requires jury privileges",
+     *     @OA\Schema(type="boolean")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="category",
      *     in="query",
-     *     type="integer",
-     *     description="Get the scoreboard for only this category"
+     *     description="Get the scoreboard for only this category",
+     *     @OA\Schema(type="integer")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="country",
      *     in="query",
-     *     type="string",
-     *     description="Get the scoreboard for only this country (in ISO 3166-1 alpha-3 format)"
+     *     description="Get the scoreboard for only this country (in ISO 3166-1 alpha-3 format)",
+     *     @OA\Schema(type="string")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="affiliation",
      *     in="query",
-     *     type="integer",
-     *     description="Get the scoreboard for only this affiliation"
+     *     description="Get the scoreboard for only this affiliation",
+     *     @OA\Schema(type="integer")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="public",
      *     in="query",
-     *     type="boolean",
-     *     description="Show publicly visible scoreboard, even for users with more permissions"
+     *     description="Show publicly visible scoreboard, even for users with more permissions",
+     *     @OA\Schema(type="boolean")
      * )
-     * @SWG\Parameter(
+     * @OA\Parameter(
      *     name="sortorder",
      *     in="query",
-     *     type="integer",
-     *     description="The sort order to get the scoreboard for. If not given, uses the lowest sortorder"
+     *     description="The sort order to get the scoreboard for. If not given, uses the lowest sortorder",
+     *     @OA\Schema(type="integer")
      * )
-     * @throws \Doctrine\ORM\NonUniqueResultException
-     * @throws \Exception
+     * @throws NonUniqueResultException
      */
-    public function getScoreboardAction(Request $request)
+    public function getScoreboardAction(Request $request): array
     {
         $filter = new Filter();
         if ($request->query->has('category')) {
@@ -125,7 +110,7 @@ class ScoreboardController extends AbstractRestController
         if ($request->query->has('sortorder')) {
             $sortorder = $request->query->getInt('sortorder');
         } else {
-            // Get the lowest available sortorder
+            // Get the lowest available sortorder.
             $queryBuilder = $this->em->createQueryBuilder()
                 ->from(TeamCategory::class, 'c')
                 ->select('MIN(c.sortorder)');
@@ -136,15 +121,10 @@ class ScoreboardController extends AbstractRestController
         }
 
         /** @var Contest $contest */
-        $contest         = $this->em->getRepository(Contest::class)->find($this->getContestId($request));
-        $inactiveAllowed = $this->isGranted('ROLE_API_READER');
-        $accessAllowed   = ($inactiveAllowed && $contest->getEnabled()) || (!$inactiveAllowed && $contest->isActive());
-        if (!$accessAllowed) {
-            throw new AccessDeniedHttpException();
-        }
+        // Also checks access of user to the contest via getContestQueryBuilder() from superclass.
+        $contest = $this->em->getRepository(Contest::class)->find($this->getContestId($request));
 
-        // Get the event for this scoreboard
-        // TODO: add support for after_event_id
+        // Get the event for this scoreboard.
         /** @var Event $event */
         $event = $this->em->createQueryBuilder()
             ->from(Event::class, 'e')
@@ -156,17 +136,24 @@ class ScoreboardController extends AbstractRestController
 
         $scoreboard = $this->scoreboardService->getScoreboard($contest, !$public, $filter, !$allTeams);
 
-        // Build up scoreboard results
-        $results = [
-            'event_id' => (string)$event->getEventid(),
-            'time' => Utils::absTime($event->getEventtime()),
-            'contest_time' => Utils::relTime($event->getEventtime() - $contest->getStarttime()),
-            'state' => $contest->getState(),
-            'rows' => [],
-        ];
+        $results = [];
+        if ($event) {
+            // Build up scoreboard results.
+            $results = [
+                'time' => Utils::absTime($event->getEventtime()),
+                'contest_time' => Utils::relTime($event->getEventtime() - $contest->getStarttime()),
+                'state' => $contest->getState(),
+                'rows' => [],
+            ];
+            if (!$request->query->getBoolean('strict')) {
+                $results['event_id'] = (string)$event->getEventid();
+            }
+        }
 
         // Return early if there's nothing to display yet.
-        if (!$scoreboard) return $results;
+        if (!$scoreboard) {
+            return $results;
+        }
 
         $scoreIsInSeconds = (bool)$this->config->get('score_in_seconds');
 
@@ -176,7 +163,7 @@ class ScoreboardController extends AbstractRestController
             }
             $row = [
                 'rank' => $teamScore->rank,
-                'team_id' => (string)$teamScore->team->getApiId($this->eventLogService),
+                'team_id' => $teamScore->team->getApiId($this->eventLogService),
                 'score' => [
                     'num_solved' => $teamScore->numPoints,
                     'total_time' => $teamScore->totalTime,
@@ -184,12 +171,11 @@ class ScoreboardController extends AbstractRestController
                 'problems' => [],
             ];
 
-            /** @var ScoreboardMatrixItem $matrixItem */
             foreach ($scoreboard->getMatrix()[$teamScore->team->getTeamid()] as $problemId => $matrixItem) {
                 $contestProblem = $scoreboard->getProblems()[$problemId];
                 $problem        = [
                     'label' => $contestProblem->getShortname(),
-                    'problem_id' => (string)$contestProblem->getApiId($this->eventLogService),
+                    'problem_id' => $contestProblem->getApiId($this->eventLogService),
                     'num_judged' => $matrixItem->numSubmissions,
                     'num_pending' => $matrixItem->numSubmissionsPending,
                     'solved' => $matrixItem->isCorrect,
@@ -203,9 +189,7 @@ class ScoreboardController extends AbstractRestController
                 $row['problems'][] = $problem;
             }
 
-            usort($row['problems'], function ($a, $b) {
-                return $a['label'] <=> $b['label'];
-            });
+            usort($row['problems'], fn($a, $b) => $a['label'] <=> $b['label']);
 
             if ($request->query->getBoolean('strict')) {
                 foreach ($row['problems'] as $key => $data) {
@@ -220,19 +204,13 @@ class ScoreboardController extends AbstractRestController
         return $results;
     }
 
-    /**
-     * @inheritdoc
-     */
     protected function getQueryBuilder(Request $request): QueryBuilder
     {
-        throw new NotImplementedException();
+        throw new Exception('Not implemented');
     }
 
-    /**
-     * @inheritdoc
-     */
     protected function getIdField(): string
     {
-        throw new NotImplementedException();
+        throw new Exception('Not implemented');
     }
 }

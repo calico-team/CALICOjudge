@@ -1,7 +1,6 @@
 /domserver-static.php
 /judgehost-static.php
 /runguard-config.h
-/submit-config.h
 /apache.conf
 /nginx-conf
 /nginx-conf-inner
@@ -13,4 +12,4 @@
 /symfony_app.secret
 /initial_admin_password.secret
 /sudoers-domjudge
-/shadowing.yaml
+/docs.yaml

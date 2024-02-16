@@ -13,7 +13,8 @@ Requirements
 System requirements
 ```````````````````
 * The operating system is Linux or another Unix variant. DOMjudge has mostly
-  been tested with Debian and Ubuntu, but should work on other environments.
+  been tested with Debian and Ubuntu on AMD64, but should work on other environments.
+  See our `wiki <https://github.com/DOMjudge/domjudge/wiki/Running-DOMjudge-in-WSL>`_ for information about DOMjudge and WSLv2.
 * It is probably necessary that you have root access to be able to install
   the necessary components, but it's not required for actually running the
   DOMserver.
@@ -23,7 +24,7 @@ System requirements
 
 Software requirements
 `````````````````````
-* A web server with support for PHP >= 7.2.5 and the ``mysqli``, ``curl``, ``gd``,
+* A web server with support for PHP >= 7.4.0 and the ``mysqli``, ``curl``, ``gd``,
   ``mbstring``, ``intl``, ``zip``, ``xml`` and ``json`` extensions for PHP.
 * MySQL or MariaDB database. This can be on the same machine, but for
   advanced setups can also run on a dedicated machine.
@@ -47,6 +48,9 @@ distributions like CentOS and Fedora::
 
 Installation
 ------------
+These instructions assume a `tarball <https://www.domjudge.org/download>`_, see :ref:`this section <bootstrap>`
+for instructions to build from git sources.
+
 The DOMjudge build/install system consists of a ``configure``
 script and makefiles, but when installing it, some more care has to be
 taken than simply running ``./configure && make && make install``.
@@ -96,7 +100,7 @@ Web server configuration
 For the web interface, you need to have a web server (e.g. nginx or Apache)
 installed on the DOMserver and made sure that PHP correctly works
 with it. Refer to the documentation of your web server and PHP for
-details. In the examples below, replace ``7.3`` with the PHP version
+details. In the examples below, replace |phpversion| with the PHP version
 you're installing.
 
 To configure the Apache web server for DOMjudge, use the Apache
@@ -105,30 +109,58 @@ examples for configuring the DOMjudge pages with an alias directive,
 or as a virtualhost, optionally with TLS; it also contains PHP and security
 settings. Reload the web server for changes to take effect.
 
-::
+.. parsed-literal::
 
   ln -s <DOMSERVER_INSTALL_PATH>/etc/apache.conf /etc/apache2/conf-available/domjudge.conf
-  ln -s <DOMSERVER_INSTALL_PATH>/etc/domjudge-fpm.conf /etc/php/7.3/fpm/pool.d/domjudge.conf
+  ln -s <DOMSERVER_INSTALL_PATH>/etc/domjudge-fpm.conf /etc/php/|phpversion|/fpm/pool.d/domjudge.conf
   a2enmod proxy_fcgi setenvif rewrite
-  a2enconf php7.3-fpm domjudge
+  a2enconf php\ |phpversion|-fpm domjudge
   # Edit the file /etc/apache2/conf-available/domjudge.conf and
-  # /etc/php/7.3/fpm/pool.d/domjudge.conf to your needs
-  service php7.3-fpm reload
+  # /etc/php/\ |phpversion|/fpm/pool.d/domjudge.conf to your needs
+  service php\ |phpversion|-fpm reload
   service apache2 reload
 
 An nginx webserver configuration snippet is also provided in
 ``etc/nginx-conf``.  You still need ``htpasswd`` from ``apache2-utils``
-though. To use this configuration, perform the following steps::
+though. To use this configuration, perform the following steps
+
+.. parsed-literal::
 
   ln -s <DOMSERVER_INSTALL_PATH>/etc/nginx-conf /etc/nginx/sites-enabled/domjudge
-  ln -s <DOMSERVER_INSTALL_PATH>/etc/domjudge-fpm.conf /etc/php/7.3/fpm/pool.d/domjudge.conf
+  ln -s <DOMSERVER_INSTALL_PATH>/etc/domjudge-fpm.conf /etc/php/\ |phpversion|/fpm/pool.d/domjudge.conf
   # Edit the files /etc/nginx/sites-enabled/domjudge and
-  # /etc/php/7.3/fpm/pool.d/domjudge.conf to your needs
-  service php7.3-fpm reload
+  # /etc/php/\ |phpversion|/fpm/pool.d/domjudge.conf to your needs
+  service php\ |phpversion|-fpm reload
   service nginx reload
 
 The judgehosts connect to DOMjudge via the DOMjudge API so need
 to be able to access at least this part of the web interface.
+
+Running behind a proxy or loadbalancer
+--------------------------------------
+
+When running the DOMserver behind a proxy or loadbalancer, you might still want
+to have the webserver and/or the DOMserver know the original client IP. By
+default DOMjudge and the webserver (both nginx and Apache) will not use the
+client IP, but rather the IP of the proxy / loadbalancer.
+
+The preferred way to do this is in the webserver configuration. See
+``/etc/apache2/conf-available/domjudge.conf`` for Apache and
+``/etc/nginx/sites-enabled/domjudge`` for nginx. Look for ``loadbalancer``
+in the file. When using this approach both the webserver and DOMjudge itself
+will know the actual IP of the client.
+
+If you cannot edit the webserver configuration for some reason, there is an
+alternative way to configure this. Edit the file ``webapp/.env.local`` (create
+it if it does not exist) and add a line in the form of::
+
+  TRUSTED_PROXIES=1.2.3.4
+
+Where ``1.2.3.4`` is the IP address of the proxy or loadbalancer. You can set
+multiple IP addresses by separating them by a comma (``,``). The drawback to
+this approach is that the webserver is not aware of the actual client IP. This
+means that access logs for the webserver will still report the IP of the proxy
+or loadbalancer.
 
 Log in to DOMjudge
 ------------------

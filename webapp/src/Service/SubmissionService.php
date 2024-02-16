@@ -4,22 +4,28 @@ namespace App\Service;
 
 use App\Entity\Contest;
 use App\Entity\ContestProblem;
+use App\Entity\JudgeTask;
 use App\Entity\Judging;
-use App\Entity\JudgingRun;
 use App\Entity\Language;
 use App\Entity\Submission;
 use App\Entity\SubmissionFile;
 use App\Entity\Team;
+use App\Entity\User;
 use App\Utils\FreezeData;
 use App\Utils\Utils;
+use Doctrine\DBAL\Exception as DBALException;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\NonUniqueResultException;
+use Doctrine\ORM\NoResultException;
 use Doctrine\ORM\Query\Expr\Join;
+use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
+use ZipArchive;
 
 /**
  * Class SubmissionService
@@ -33,38 +39,18 @@ class SubmissionService
         'ACCEPTED' => 'CORRECT',
         'WRONG_ANSWER' => 'WRONG-ANSWER',
         'TIME_LIMIT_EXCEEDED' => 'TIMELIMIT',
-        'RUN_TIME_ERROR' => 'RUN-ERROR'
+        'RUN_TIME_ERROR' => 'RUN-ERROR',
+        'COMPILER_ERROR' => 'COMPILER-ERROR',
+        'NO_OUTPUT' => 'NO-OUTPUT',
+        'OUTPUT_LIMIT' => 'OUTPUT-LIMIT'
     ];
 
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * @var LoggerInterface
-     */
-    protected $logger;
-
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
-
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var EventLogService
-     */
-    protected $eventLogService;
-
-    /**
-     * @var ScoreboardService
-     */
-    protected $scoreboardService;
+    protected EntityManagerInterface $em;
+    protected LoggerInterface $logger;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected EventLogService $eventLogService;
+    protected ScoreboardService $scoreboardService;
 
     public function __construct(
         EntityManagerInterface $em,
@@ -102,15 +88,12 @@ class SubmissionService
      * - old_result: result of old judging to filter on
      * - result: result of current judging to filter on
      *
-     * @param array $contests
-     * @param array $restrictions
-     * @param int   $limit
      * @return array An array with two elements: the first one is the list of
      *               submissions and the second one is an array with counts.
-     * @throws \Doctrine\ORM\NoResultException
-     * @throws \Doctrine\ORM\NonUniqueResultException
+     * @throws NoResultException
+     * @throws NonUniqueResultException
      */
-    public function getSubmissionList(array $contests, array $restrictions, int $limit = 0)
+    public function getSubmissionList(array $contests, array $restrictions, int $limit = 0): array
     {
         if (empty($contests)) {
             return [[], []];
@@ -121,8 +104,8 @@ class SubmissionService
             ->select('s', 'j', 'cp')
             ->join('s.team', 't')
             ->join('s.contest_problem', 'cp')
-            ->andWhere('s.cid IN (:contests)')
-            ->setParameter(':contests', array_keys($contests))
+            ->andWhere('s.contest IN (:contests)')
+            ->setParameter('contests', array_keys($contests))
             ->orderBy('s.submittime', 'DESC')
             ->addOrderBy('s.submitid', 'DESC');
 
@@ -130,27 +113,33 @@ class SubmissionService
             $queryBuilder->setMaxResults($limit);
         }
 
+        if ($restrictions['with_external_id'] ?? false) {
+            $queryBuilder->andWhere('s.externalid IS NOT NULL');
+        }
+
         if (isset($restrictions['rejudgingid'])) {
             $queryBuilder
-                ->leftJoin('s.judgings', 'j', Join::WITH, 'j.rejudgingid = :rejudgingid')
+                ->leftJoin('s.judgings', 'j', Join::WITH, 'j.rejudging = :rejudgingid')
                 ->leftJoin(Judging::class, 'jold', Join::WITH,
-                           'j.prevjudgingid IS NULL AND s.submitid = jold.submitid AND jold.valid = 1 OR j.prevjudgingid = jold.judgingid')
-                ->addSelect('jold.result AS oldresult')
-                ->andWhere('s.rejudgingid = :rejudgingid OR j.rejudgingid = :rejudgingid')
-                ->setParameter(':rejudgingid', $restrictions['rejudgingid']);
+                    'j.original_judging IS NULL AND s.submitid = jold.submission AND jold.valid = 1')
+                ->leftJoin(Judging::class, 'jold2', Join::WITH,
+                    'j.original_judging = jold2.judgingid')
+                ->addSelect('COALESCE(jold.result, jold2.result) AS oldresult')
+                ->andWhere('s.rejudging = :rejudgingid OR j.rejudging = :rejudgingid')
+                ->setParameter('rejudgingid', $restrictions['rejudgingid']);
 
             if (isset($restrictions['rejudgingdiff'])) {
                 if ($restrictions['rejudgingdiff']) {
-                    $queryBuilder->andWhere('j.result != jold.result');
+                    $queryBuilder->andWhere('j.result != COALESCE(jold.result, jold2.result)');
                 } else {
-                    $queryBuilder->andWhere('j.result = jold.result');
+                    $queryBuilder->andWhere('j.result = COALESCE(jold.result, jold2.result)');
                 }
             }
 
             if (isset($restrictions['old_result'])) {
                 $queryBuilder
-                    ->andWhere('jold.result = :oldresult')
-                    ->setParameter(':oldresult', $restrictions['old_result']);
+                    ->andWhere('COALESCE(jold.result, jold2.result) = :oldresult')
+                    ->setParameter('oldresult', $restrictions['old_result']);
             }
         } else {
             $queryBuilder->leftJoin('s.judgings', 'j', Join::WITH, 'j.valid = 1');
@@ -162,7 +151,7 @@ class SubmissionService
             if ($restrictions['verified']) {
                 $queryBuilder->andWhere('j.verified = 1');
             } else {
-                $queryBuilder->andWhere('j.verified = 0 OR (j.verified IS NULL AND s.judgehost IS NULL)');
+                $queryBuilder->andWhere('j.verified = 0 OR j.verified IS NULL');
             }
         }
 
@@ -204,38 +193,50 @@ class SubmissionService
             } else {
                 $queryBuilder
                     ->andWhere('ej.result = :externalresult')
-                    ->setParameter(':externalresult', $restrictions['external_result']);
+                    ->setParameter('externalresult', $restrictions['external_result']);
             }
         }
 
         if (isset($restrictions['teamid'])) {
             $queryBuilder
-                ->andWhere('s.teamid = :teamid')
-                ->setParameter(':teamid', $restrictions['teamid']);
+                ->andWhere('s.team = :teamid')
+                ->setParameter('teamid', $restrictions['teamid']);
+        }
+
+        if (isset($restrictions['userid'])) {
+            $queryBuilder
+                ->andWhere('s.user = :userid')
+                ->setParameter('userid', $restrictions['userid']);
         }
 
         if (isset($restrictions['categoryid'])) {
             $queryBuilder
-                ->andWhere('t.categoryid = :categoryid')
-                ->setParameter(':categoryid', $restrictions['categoryid']);
+                ->andWhere('t.category = :categoryid')
+                ->setParameter('categoryid', $restrictions['categoryid']);
+        }
+
+        if (isset($restrictions['visible'])) {
+            $queryBuilder
+                ->innerJoin('t.category', 'cat')
+                ->andWhere('cat.visible = true');
         }
 
         if (isset($restrictions['probid'])) {
             $queryBuilder
-                ->andWhere('s.probid = :probid')
-                ->setParameter(':probid', $restrictions['probid']);
+                ->andWhere('s.problem = :probid')
+                ->setParameter('probid', $restrictions['probid']);
         }
 
         if (isset($restrictions['langid'])) {
             $queryBuilder
-                ->andWhere('s.langid = :langid')
-                ->setParameter(':langid', $restrictions['langid']);
+                ->andWhere('s.language = :langid')
+                ->setParameter('langid', $restrictions['langid']);
         }
 
         if (isset($restrictions['judgehost'])) {
             $queryBuilder
                 ->andWhere('s.judgehost = :judgehost')
-                ->setParameter(':judgehost', $restrictions['judgehost']);
+                ->setParameter('judgehost', $restrictions['judgehost']);
         }
 
         if (isset($restrictions['result'])) {
@@ -244,7 +245,7 @@ class SubmissionService
             } else {
                 $queryBuilder
                     ->andWhere('j.result = :result')
-                    ->setParameter(':result', $restrictions['result']);
+                    ->setParameter('result', $restrictions['result']);
             }
         }
 
@@ -275,7 +276,8 @@ class SubmissionService
             'correct' => 'j.result LIKE \'correct\'',
             'ignored' => 's.valid = 0',
             'unverified' => 'j.verified = 0 AND j.result IS NOT NULL',
-            'queued' => 'j.result IS NULL'
+            'queued' => 'j.result IS NULL AND j.starttime IS NULL',
+            'judging' => 'j.starttime IS NOT NULL AND j.endtime IS NULL'
         ];
         foreach ($countQueryExtras as $count => $countQueryExtra) {
             $countQueryBuilder = (clone $queryBuilder)->select('COUNT(s.submitid) AS cnt');
@@ -286,6 +288,11 @@ class SubmissionService
                 ->getQuery()
                 ->getSingleScalarResult();
         }
+        $counts['perteam'] = (clone $queryBuilder)
+            ->select('COUNT(DISTINCT s.team) AS cnt')
+            ->andWhere($countQueryExtras['queued'])
+            ->getQuery()
+            ->getSingleScalarResult();
 
         return [$submissions, $counts];
     }
@@ -295,31 +302,29 @@ class SubmissionService
      * judging runs. Runs can be NULL if not run yet. A return value of
      * NULL means that a final result cannot be determined yet; this may
      * only occur when not all testcases have been run yet.
-     * @param JudgingRun[] $runs
-     * @param array        $resultsPrio
-     * @return string|null
+     * @param string[] $runresults
      */
-    public function getFinalResult(array $runs, array $resultsPrio)
+    public static function getFinalResult(array $runresults, array $resultsPrio): ?string
     {
-        // Whether we have NULL results
+        // Whether we have NULL results.
         $haveNullResult = false;
 
         // This stores the current result and priority to be returned:
-        $bestRun      = null;
-        $bestPriority = -1;
+        $bestRunResult = null;
+        $bestPriority  = -1;
 
-        foreach ($runs as $testCase => $run) {
-            if ($run === null) {
+        foreach ($runresults as $runresult) {
+            if ($runresult === null) {
                 $haveNullResult = true;
+                break;
             } else {
-                $priority = $resultsPrio[$run->getRunresult()];
+                $priority = $resultsPrio[$runresult];
                 if (empty($priority)) {
-                    throw new \InvalidArgumentException(
-                        sprintf("Unknown results '%s' found", $run->getRunresult()));
+                    throw new InvalidArgumentException(sprintf("Unknown results '%s' found", $runresult));
                 }
                 if ($priority > $bestPriority) {
-                    $bestRun      = $run;
-                    $bestPriority = $priority;
+                    $bestRunResult = $runresult;
+                    $bestPriority  = $priority;
                 }
             }
         }
@@ -336,7 +341,7 @@ class SubmissionService
             return null;
         }
 
-        return $bestRun ? $bestRun->getRunresult() : null;
+        return $bestRunResult;
     }
 
     /**
@@ -344,32 +349,34 @@ class SubmissionService
      * validates it and puts it into the database. Additionally it
      * moves it to a backup storage.
      * @param Team|int            $team
+     * @param User|int|null       $user
      * @param ContestProblem|int  $problem
      * @param Contest|int         $contest
      * @param Language|string     $language
      * @param UploadedFile[]      $files
      * @param Submission|int|null $originalSubmission
-     * @param string|null         $entryPoint
-     * @param string|null         $externalId
-     * @param float|null          $submitTime
-     * @param string|null         $message
-     * @return Submission|null
-     * @throws \Doctrine\DBAL\DBALException
+     * @throws DBALException
      */
     public function submitSolution(
         $team,
+        $user,
         $problem,
         $contest,
         $language,
         array $files,
+        ?string $source = null,
+        ?string $juryMember = null,
         $originalSubmission = null,
-        string $entryPoint = null,
-        $externalId = null,
-        float $submitTime = null,
-        string &$message = null
-    ) {
+        ?string $entryPoint = null,
+        ?string $externalId = null,
+        ?float $submitTime = null,
+        ?string &$message = null
+    ): ?Submission {
         if (!$team instanceof Team) {
             $team = $this->em->getRepository(Team::class)->find($team);
+        }
+        if ($user !== null && !$user instanceof User) {
+            $user = $this->em->getRepository(User::class)->find($user);
         }
         if (!$contest instanceof Contest) {
             $contest = $this->em->getRepository(Contest::class)->find($contest);
@@ -434,6 +441,10 @@ class SubmissionService
                 sprintf("The contest is closed, no submissions accepted. [c%d]", $contest->getCid()));
         }
 
+        if (!$contest->getAllowSubmit()) {
+            throw new BadRequestHttpException('Submissions for contest (temporarily) disabled');
+        }
+
         if (!$language->getAllowSubmit()) {
             throw new BadRequestHttpException(
                 sprintf("Language '%s' not found in database or not submittable.", $language->getLangid()));
@@ -459,10 +470,21 @@ class SubmissionService
                 sprintf("Team '%d' not found in database or not enabled.", $team->getTeamid()));
         }
 
+        if ($user && !$this->dj->checkrole('jury') && !$user->getEnabled()) {
+            throw new BadRequestHttpException(
+                sprintf("User '%d' not found in database or not enabled.", $user->getUserid()));
+        }
+
         if (!$problem->getAllowSubmit()) {
             throw new BadRequestHttpException(
                 sprintf("Problem p%d not submittable [c%d].",
                         $problem->getProbid(), $contest->getCid()));
+        }
+
+        // If this method is called multiple times, we loose the user from Doctrine because of the internal API call
+        // to add the submission to the event table. To fix this, reload the user if this is the case.
+        if ($user && !$this->em->contains($user)) {
+            $user = $this->em->getRepository(User::class)->find($user->getUserid());
         }
 
         // Reindex array numerically to make sure we can index it in order
@@ -481,7 +503,7 @@ class SubmissionService
             }
             $totalSize += $file->getSize();
 
-            if ($language->getFilterCompilerFiles()) {
+            if ($source !== 'shadowing' && $language->getFilterCompilerFiles()) {
                 $matchesExtension = false;
                 foreach ($language->getExtensions() as $extension) {
                     $extensionLength = strlen($extension);
@@ -496,7 +518,7 @@ class SubmissionService
             }
         }
 
-        if ($language->getFilterCompilerFiles() && $extensionMatchCount === 0) {
+        if ($source !== 'shadowing' && $language->getFilterCompilerFiles() && $extensionMatchCount === 0) {
             $message = sprintf(
                 "None of the submitted files match any of the allowed " .
                 "extensions for %s (allowed: %s)",
@@ -512,16 +534,35 @@ class SubmissionService
 
         $this->logger->info('Submission input verified');
 
-        // First look up any expected results in file, so as to minimize the
+        // First look up any expected results in all submission files to minimize the
         // SQL transaction time below.
         if ($this->dj->checkrole('jury')) {
-            $results = self::getExpectedResults(file_get_contents($files[0]->getRealPath()),
-                $this->config->get('results_remap'));
+            $results = null;
+            foreach ($files as $rank => $file) {
+                $fileResult = self::getExpectedResults(file_get_contents($file->getRealPath()),
+                    $this->config->get('results_remap'));
+                if ($fileResult === false) {
+                        $message = sprintf("Found more than one @EXPECTED_RESULTS@ in file '%s'.",
+                            $file->getClientOriginalName());
+                        return null;
+                }
+                if ($fileResult !== null) {
+                    if ($results !== null) {
+                        $message = sprintf("Found more than one file with @EXPECTED_RESULTS@, e.g. in '%s'.",
+                            $file->getClientOriginalName());
+                        return null;
+                    }
+                    $results = $fileResult;
+                }
+            }
         }
 
         $submission = new Submission();
         $submission
             ->setTeam($team)
+            ->setUser($user)
+            ->setContest($contest)
+            ->setProblem($problem->getProblem())
             ->setContestProblem($problem)
             ->setLanguage($language)
             ->setSubmittime($submitTime)
@@ -546,17 +587,32 @@ class SubmissionService
             $this->em->persist($submissionFile);
         }
 
-        $this->em->transactional(function () use ($contest, $submission) {
+        $judging = new Judging();
+        $judging
+            ->setContest($contest)
+            ->setSubmission($submission);
+        if ($juryMember !== null) {
+            $judging->setJuryMember($juryMember);
+        }
+        $this->em->persist($judging);
+        // This is so that we can use the submitid/judgingid below.
+        $this->em->flush();
+
+        $this->dj->maybeCreateJudgeTasks($judging,
+            $source === 'problem import' ? JudgeTask::PRIORITY_LOW : JudgeTask::PRIORITY_DEFAULT);
+
+        $this->em->wrapInTransaction(function () use ($contest, $submission) {
             $this->em->flush();
             $this->eventLogService->log('submission', $submission->getSubmitid(),
                                         EventLogService::ACTION_CREATE, $contest->getCid());
         });
 
-        // Reload contest, team and contestproblem for now, as
+        // Reload submission, contest, team and contestproblem for now, as
         // EventLogService::log will clear the Doctrine entity manager.
         /** @var Contest $contest */
         /** @var Team $team */
         /** @var ContestProblem $problem */
+        $submission = $this->em->getRepository(Submission::class)->find($submission->getSubmitid());
         $contest = $this->em->getRepository(Contest::class)->find($contest->getCid());
         $team    = $this->em->getRepository(Team::class)->find($team->getTeamid());
         $problem = $this->em->getRepository(ContestProblem::class)->find([
@@ -570,6 +626,9 @@ class SubmissionService
                                            $submission->getSubmitid(), $team->getTeamid(),
                                            $language->getLangid(), $problem->getProblem()->getProbid()));
 
+        $this->dj->auditlog('submission', $submission->getSubmitid(), 'added',
+            'via ' . $source ?? 'unknown', null, $contest->getCid());
+
         if (Utils::difftime((float)$contest->getEndtime(), $submitTime) <= 0) {
             $this->logger->info(
                 "The contest is closed, submission stored but not processed. [c%d]",
@@ -582,17 +641,26 @@ class SubmissionService
 
     /**
      * Checks given source file for expected results string
-     * @param string $source
-     * @param array  $resultsRemap
-     * @return array|null Array of expected results if found or null otherwise
+     * @return array|false|null Array of expected results if found, false when multiple matches are found, or null otherwise.
      */
     public static function getExpectedResults(string $source, array $resultsRemap)
     {
         $matchstring = null;
         $pos         = false;
-        foreach (self::PROBLEM_RESULT_MATCHSTRING as $matchstring) {
-            if (($pos = mb_stripos($source, $matchstring)) !== false) {
-                break;
+        foreach (self::PROBLEM_RESULT_MATCHSTRING as $pattern) {
+            $currentPos = mb_stripos($source, $pattern);
+            if ($currentPos !== false) {
+                // Check if we find another match after the first one, since
+                // that is not allowed.
+                if (mb_stripos($source, $pattern, $currentPos+1) !== false) {
+                    return false;
+                }
+                // Check that another pattern did not give a match already.
+                if ($pos !== false) {
+                    return false;
+                }
+                $pos = $currentPos;
+                $matchstring = $pattern;
             }
         }
 
@@ -618,9 +686,7 @@ class SubmissionService
     }
 
     /**
-     * Normalize the given expected result
-     * @param string $result
-     * @return string
+     * Normalize the given expected result.
      */
     public static function normalizeExpectedResult(string $result): string
     {
@@ -634,8 +700,6 @@ class SubmissionService
     /**
      * Compute the filename of a given submission. $fileData must be an array
      * that contains the data from submission and submission_file.
-     * @param array $fileData
-     * @return string
      */
     public function getSourceFilename(array $fileData): string
     {
@@ -651,23 +715,20 @@ class SubmissionService
     }
 
     /**
-     * Get a response object containing the given submission as a ZIP
+     * Get a response object containing the given submission as a ZIP.
      *
-     * @param Submission $submission
-     *
-     * @return StreamedResponse
      * @throws ServiceUnavailableHttpException
      */
     public function getSubmissionZipResponse(Submission $submission): StreamedResponse
     {
         /** @var SubmissionFile[] $files */
         $files = $submission->getFiles();
-        $zip   = new \ZipArchive;
+        $zip   = new ZipArchive;
         if (!($tmpfname = tempnam($this->dj->getDomjudgeTmpDir(), "submission_file-"))) {
             throw new ServiceUnavailableHttpException(null, 'Could not create temporary file.');
         }
 
-        $res = $zip->open($tmpfname, \ZipArchive::OVERWRITE);
+        $res = $zip->open($tmpfname, ZipArchive::OVERWRITE);
         if ($res !== true) {
             throw new ServiceUnavailableHttpException(null, "Could not create temporary zip file.");
         }

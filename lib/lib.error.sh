@@ -20,7 +20,7 @@ logmsg ()
 
 	msglevel="$1"; shift
 	msec=`date '+%N'`
-	stamp="[`date '+%b %d %T'`.`printf "%.3s" $msec`] $PROGNAME[$$]:"
+	stamp="[`date '+%b %d %T'`.`printf "%.3s" $msec`] ${PROGNAME}[$$]:"
 # Expand backslash escape sequences using printf, since support for
 # echo with(out) option -e is unreliable. First use echo to put spaces
 # between arguments.
@@ -45,7 +45,7 @@ error ()
 	trap - EXIT
 
 	if [ "$@" ]; then
-		logmsg $LOG_ERR "error: $@"
+		logmsg $LOG_ERR "error: $*"
 	else
 		logmsg $LOG_ERR "unexpected error, aborting!"
 	fi
@@ -55,5 +55,5 @@ error ()
 
 warning ()
 {
-	logmsg $LOG_WARNING "warning: $@"
+	logmsg $LOG_WARNING "warning: $*"
 }

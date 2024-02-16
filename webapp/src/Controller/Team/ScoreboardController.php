@@ -25,34 +25,11 @@ use Symfony\Component\Routing\Annotation\Route;
  */
 class ScoreboardController extends BaseController
 {
-    /**
-     * @var DOMJudgeService
-     */
-    protected $dj;
+    protected DOMJudgeService $dj;
+    protected ConfigurationService $config;
+    protected ScoreboardService $scoreboardService;
+    protected EntityManagerInterface $em;
 
-    /**
-     * @var ConfigurationService
-     */
-    protected $config;
-
-    /**
-     * @var ScoreboardService
-     */
-    protected $scoreboardService;
-
-    /**
-     * @var EntityManagerInterface
-     */
-    protected $em;
-
-    /**
-     * ScoreboardController constructor.
-     *
-     * @param DOMJudgeService        $dj
-     * @param ConfigurationService   $config
-     * @param ScoreboardService      $scoreboardService
-     * @param EntityManagerInterface $em
-     */
     public function __construct(
         DOMJudgeService $dj,
         ConfigurationService $config,
@@ -67,20 +44,17 @@ class ScoreboardController extends BaseController
 
     /**
      * @Route("/scoreboard", name="team_scoreboard")
-     * @param Request $request
-     * @return Response
-     * @throws \Exception
      */
-    public function scoreboardAction(Request $request)
+    public function scoreboardAction(Request $request): Response
     {
         $user       = $this->dj->getUser();
         $response   = new Response();
-        $contest    = $this->dj->getCurrentContest($user->getTeamid());
+        $contest    = $this->dj->getCurrentContest($user->getTeam()->getTeamid());
         $refreshUrl = $this->generateUrl('team_scoreboard');
         $data       = $this->scoreboardService->getScoreboardTwigData(
             $request, $response, $refreshUrl, false, false, false, $contest
         );
-        $data['myTeamId'] = $user->getTeamid();
+        $data['myTeamId'] = $user->getTeam()->getTeamid();
 
         if ($request->isXmlHttpRequest()) {
             $data['current_contest'] = $contest;
@@ -91,14 +65,14 @@ class ScoreboardController extends BaseController
 
     /**
      * @Route("/team/{teamId<\d+>}", name="team_team")
-     * @param Request $request
-     * @param int     $teamId
-     * @return Response
-     * @throws \Exception
      */
-    public function teamAction(Request $request, int $teamId)
+    public function teamAction(Request $request, int $teamId): Response
     {
+        /** @var Team|null $team */
         $team             = $this->em->getRepository(Team::class)->find($teamId);
+        if ($team && $team->getCategory() && !$team->getCategory()->getVisible() && $teamId !== $this->dj->getUser()->getTeamId()) {
+            $team = null;
+        }
         $showFlags        = (bool)$this->config->get('show_flags');
         $showAffiliations = (bool)$this->config->get('show_affiliations');
         $data             = [
@@ -109,8 +83,8 @@ class ScoreboardController extends BaseController
 
         if ($request->isXmlHttpRequest()) {
             return $this->render('team/team_modal.html.twig', $data);
-        } else {
-            return $this->render('team/team.html.twig', $data);
         }
+
+        return $this->render('team/team.html.twig', $data);
     }
 }

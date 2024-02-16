@@ -9,6 +9,7 @@ set -e
 BINDIR="@domserver_bindir@"
 ETCDIR="@domserver_etcdir@"
 WEBAPPDIR="@domserver_webappdir@"
+EXAMPLEPROBDIR="@domserver_exampleprobdir@"
 
 PASSWDFILE="$ETCDIR/dbpasswords.secret"
 
@@ -31,12 +32,15 @@ Commands:
   bare-install     create database, setup defaults if not existing
   uninstall        remove database users and database, INCLUDING ALL DATA!
   install-examples install examples only
+  install-loadtest configure for load testing. WARNING: CREATES A LOT OF EXTRA ITEMS!
   upgrade          upgrade MySQL database schema to current version
 
 Options:
   -u <user>  connect to MySQL with DB admin <user>
   -p <pass>  use password <pass> for DB admin user
+  -q         be (mostly) quiet
   -r         read DB admin password from prompt
+  -s         connect via local socket (do not specify port)
 
 Note: you may want to store your credentials in ~/.my.cnf in order to
 not have to pass any of the options above.
@@ -47,6 +51,8 @@ EOF
 # Wrapper around mysql command to allow setting options, user, etc.
 mysql()
 {
+	local user pass
+
 	# shellcheck disable=SC2153
 	if [ -n "$DBUSER" ]; then
 		user="-u $DBUSER"
@@ -57,15 +63,12 @@ mysql()
 	if [ -n "$PASSWD" ]; then
 		pass="-p$PASSWD"
 	else
-		pass=""
 		[ -n "$PROMPT_PASSWD" ] && pass="-p"
 		[ -n "$DBA_PASSWD" ]    && pass="-p$DBA_PASSWD"
 	fi
-	if [ -n "$pass" ]; then
-		command mysql $user "$pass" -h "$DBHOST" --silent --skip-column-names "$@"
-	else
-		command mysql $user -h "$DBHOST" --silent --skip-column-names "$@"
-	fi
+
+	[ -z "$USE_SOCKET" ] && port="-P$DBPORT"
+	command mysql $user ${pass:+"$pass"} -h "$DBHOST" ${port:+"$port"} --silent --skip-column-names "$@"
 }
 
 # Quick shell hack to get a key from an INI file.
@@ -117,9 +120,9 @@ symfony_console()
 
 		if [ -n "$DBA_USER" ]; then
 			if [ -n "$DBA_PASSWD" ]; then
-				DATABASE_URL=mysql://${DBA_USER}:${DBA_PASSWD}@${domjudge_DBHOST}:3306/${domjudge_DBNAME}
+				DATABASE_URL=mysql://${DBA_USER}:${DBA_PASSWD}@${domjudge_DBHOST}:${domjudge_DBPORT}/${domjudge_DBNAME}
 			else
-				DATABASE_URL=mysql://${DBA_USER}@${domjudge_DBHOST}:3306/${domjudge_DBNAME}
+				DATABASE_URL=mysql://${DBA_USER}@${domjudge_DBHOST}:${domjudge_DBPORT}/${domjudge_DBNAME}
 			fi
 		fi
 	fi
@@ -147,17 +150,25 @@ read_dbpasswords()
 	IFS=":"
 	# Don't pipe $PASSWDFILE into this while loop as that spawns a
 	# subshell and then variables are not retained in the original shell.
-	while read -r role host db user passwd; do
+	while read -r role host db user passwd port dummy; do
 		# Skip lines beginning with a '#'
 		[ "x$role" != "x${role###}" ] && continue
 		domjudge_DBHOST=$host
+		domjudge_DBPORT=$port
 		domjudge_DBNAME=$db
 		domjudge_DBUSER=$user
 		domjudge_PASSWD=$passwd
 		DBHOST=$host
 		DBNAME=$db
+		DBPORT=$port
 	done < "$PASSWDFILE"
 	IFS="$OLDIFS"
+	if [ -z "$domjudge_DBPORT" ]; then
+		domjudge_DBPORT=3306
+	fi
+	if [ -z "$DBPORT" ]; then
+		DBPORT=3306
+	fi
 	if [ -z "$domjudge_PASSWD" ]; then
 		echo "Error: no login info found."
 		return 1
@@ -198,7 +209,8 @@ create_db_users()
 	# in etc/domserver-config.php updated after installation.
 	echo "CREATE DATABASE IF NOT EXISTS \`$DBNAME\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-	echo "GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DBNAME\`.* TO '$domjudge_DBUSER'@'localhost' IDENTIFIED BY '$domjudge_PASSWD';"
+	echo "CREATE USER IF NOT EXISTS '$domjudge_DBUSER'@'localhost' IDENTIFIED BY '$domjudge_PASSWD';"
+	echo "GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DBNAME\`.* TO '$domjudge_DBUSER'@'localhost';"
 
 	echo "FLUSH PRIVILEGES;"
 	) | mysql
@@ -215,10 +227,17 @@ remove_db_users()
 	verbose "DOMjudge database and user(s) removed."
 }
 
+install_examples()
+{
+	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-example-data
+	"$EXAMPLEPROBDIR"/generate-contest-yaml
+	( cd "$EXAMPLEPROBDIR" && yes y | "$BINDIR"/import-contest )
+}
+
 ### Script starts here ###
 
 # Parse command-line options:
-while getopts ':u:p:qr' OPT ; do
+while getopts ':u:p:qrs' OPT ; do
 	case "$OPT" in
 		u)
 			DBA_USER=$OPTARG
@@ -231,6 +250,9 @@ while getopts ':u:p:qr' OPT ; do
 			;;
 		r)
 			PROMPT_PASSWD=1
+			;;
+		s)
+			USE_SOCKET=1
 			;;
 		:)
 			echo "Error: option '$OPTARG' requires an argument."
@@ -274,7 +296,17 @@ uninstall)
 
 install-examples)
 	read_dbpasswords
-	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-example-data
+	install_examples
+	;;
+
+install-loadtest)
+	read_dbpasswords
+	create_db_users
+	export DB_FIRST_INSTALL=1
+	symfony_console doctrine:migrations:migrate -n
+	unset DB_FIRST_INSTALL
+	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-default-data
+	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-gatling-data
 	;;
 
 create-db-users)
@@ -289,10 +321,9 @@ bare-install|install)
 	export DB_FIRST_INSTALL=1
 	symfony_console doctrine:migrations:migrate -n
 	unset DB_FIRST_INSTALL
+	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-default-data
 	if [ "$1" = "install" ]; then
-		DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-example-data
-	fi
-	if [ "$1" = "install" ]; then
+		install_examples
 		verbose "SQL structure and default/example data installed."
 	else
 		verbose "SQL structure and defaults installed (no sample data)."
@@ -306,7 +337,20 @@ upgrade)
 		echo "You may also remove those users from MySQL."
 	fi
 	read_dbpasswords
+
+	# Check if we need to upgrade the Doctrine migrations table
+	if ! echo "SHOW CREATE TABLE \`doctrine_migration_versions\`" | mysql "$DBNAME" >/dev/null 2>&1; then
+		symfony_console doctrine:migrations:sync-metadata-storage -n
+		# shellcheck disable=SC2016
+		echo 'INSERT INTO `doctrine_migration_versions`
+			(version, executed_at, execution_time)
+			SELECT concat("DoctrineMigrations\\\\Version", version), executed_at, 1
+			FROM migration_versions;' | mysql "$DBNAME"
+		echo "DROP TABLE \`migration_versions\`" | mysql "$DBNAME"
+	fi
+
 	symfony_console doctrine:migrations:migrate -n
+	DBUSER=$domjudge_DBUSER PASSWD=$domjudge_PASSWD symfony_console domjudge:load-default-data
 	verbose "DOMjudge database upgrade completed."
 	;;
 

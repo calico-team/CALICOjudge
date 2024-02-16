@@ -7,27 +7,28 @@
  */
 
 /**
- * Decode a JSON string and handle errors.
+ * Decode a JSON string with our preferred settings.
  */
 function dj_json_decode(string $str)
 {
-    $res = json_decode($str, true);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        error("Error decoding JSON data '$str': ".json_last_error_msg());
-    }
-    return $res;
+    return json_decode($str, true, 512, JSON_THROW_ON_ERROR);
 }
 
 /**
- * Encode data to JSON and handle errors.
+ * Try to decode a JSON string with our preferred settings.
+ * Does not throw error, but errors can be obtained via json_last_error().
+ */
+function dj_json_try_decode(string $str)
+{
+    return json_decode($str, true);
+}
+
+/**
+ * Encode data to JSON with our preferred settings.
  */
 function dj_json_encode($data) : string
 {
-    $res = json_encode($data, JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        error("Error encoding data to JSON: ".json_last_error_msg());
-    }
-    return $res;
+    return json_encode($data, JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 }
 
 /**
@@ -62,22 +63,35 @@ function dj_file_get_contents(string $filename, int $maxsize = -1) : string
 }
 
 /**
- * Wrapper around PHP's htmlspecialchars() to set desired options globally:
- *
- * - ENT_QUOTES: Also convert single quotes, in case string is contained
- *   in a single quoted context.
- * - ENT_HTML5: Display those single quotes as the HTML5 entity &apos;.
- * - ENT_SUBSTITUTE: Replace any invalid Unicode characters with the
- *   Unicode replacement character.
- *
- * Additionally, set the character set explicitly to the DOMjudge global
- * character set.
+ * Fix broken behaviour of escapeshellarg that it doesn't return '' for an
+ * empty string.
  */
-function specialchars(string $string) : string
+function dj_escapeshellarg(?string $arg) : string
 {
-    return htmlspecialchars(
-        $string,
-        ENT_QUOTES | ENT_HTML5 | ENT_SUBSTITUTE,
-        DJ_CHARACTER_SET
-    );
+    if (!isset($arg) || $arg==='') {
+        return "''";
+    }
+    return escapeshellarg($arg);
+}
+
+/**
+ * A simple function that allows to sleep for fractional seconds. Note that
+ * usleep is documented to consume CPU cycles and may not work for times
+ * larger than a second.
+ * Returns a boolean value for success or if the delay was interrupted by a
+ * signal, returns a float with the time remaining, similar to time_nanosleep.
+ */
+function dj_sleep(float $seconds)
+{
+    $second_in_nanoseconds = 1_000_000_000;
+
+    $seconds_int = (int)$seconds;
+    $nanoseconds = (int)($second_in_nanoseconds * ($seconds-$seconds_int));
+
+    $result = time_nanosleep($seconds_int, $nanoseconds);
+    if (is_array($result)) {
+        $result = $result['seconds'] + $result['nanoseconds'] / $second_in_nanoseconds;
+    }
+
+    return $result;
 }
