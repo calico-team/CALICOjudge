@@ -24,12 +24,12 @@
         <div class="col">
             <h1 class="teamoverview">Submissions</h1>
 
-            {% include 'team/partials/submission_list.html.twig' %}
+            {% include 'team/partials/submission_list.html.twig' with {showTestcases: true} %}
         </div>
         <div class="col">
-            <h1 class="teamoverview">Clarifications</h1>
+            <h3 class="teamoverview">Announcements</h3>
             {% if clarifications is empty %}
-                <p class="nodata">No clarifications.</p>
+                <p class="nodata">No announcements.</p>
             {% else %}
                 {% include 'team/partials/clarification_list.html.twig' with {clarifications: clarifications} %}
             {% endif %}
