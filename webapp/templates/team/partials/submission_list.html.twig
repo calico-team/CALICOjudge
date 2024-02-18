@@ -1,6 +1,5 @@
 {# Render a list of submissions for a team page #}
 {# @var submission \App\Entity\Submission #}
-
 {% if submissions is empty %}
     <div class="alert alert-warning">No submissions</div>
 {% else %}
@@ -61,7 +60,7 @@
                     </a>
                 </td>
 		    {%- if showTestcases is defined and showTestcases %}
-                <td class="testcase-results{{ tdExtraClass }}">
+                <td class="testcase-results">
                     {{- submission | testcaseResults -}}
                 </td>
         {%- endif %}
