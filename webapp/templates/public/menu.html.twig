@@ -21,7 +21,7 @@
                     <a class="nav-link disabled"><i class="fas fa-book-open"></i> Problemset</a>
                 {% endif %}
             </li>
-
+            <li class="nav-item"><a class="nav-link" href="https://calico.cs.berkeley.edu/bugreport"><i class="fas fa-bug"></i> Bug Report</a></li>
             {% if is_granted('ROLE_TEAM') %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ path('team_index') }}">
