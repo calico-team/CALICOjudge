@@ -1036,7 +1036,8 @@ class DOMJudgeService
             ->select('j')
             ->from(Judging::class, 'j')
             ->leftJoin(JudgeTask::class, 'jt', Join::WITH, 'j.judgingid = jt.jobid')
-            ->where('jt.jobid IS NULL');
+            ->where('jt.jobid IS NULL')
+            ->andWhere("j.judgingid >= 37041"); // Ignore submissions before DOMJudge 8.0 update.
     }
 
     public function unblockJudgeTasksForLanguage(string $langId): void
