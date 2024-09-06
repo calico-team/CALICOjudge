@@ -780,7 +780,7 @@ void setrestrictions()
 	setlim(STACK);
 
 	if ( filesize!=RLIM_INFINITY ) {
-		verbose("setting filesize limit to %d bytes",(int)filesize);
+		verbose("setting filesize limit to %lu bytes",filesize);
 		lim.rlim_cur = lim.rlim_max = filesize;
 		setlim(FSIZE);
 	}
@@ -1198,7 +1198,9 @@ int main(int argc, char **argv)
 
 	cgroup_create();
 
-	unshare(CLONE_FILES|CLONE_FS|CLONE_NEWIPC|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS|CLONE_SYSVSEM);
+	if ( unshare(CLONE_FILES|CLONE_FS|CLONE_NEWIPC|CLONE_NEWNET|CLONE_NEWNS|CLONE_NEWUTS|CLONE_SYSVSEM)!=0 ) {
+		error(errno, "calling unshare");
+	}
 
 	/* Check if any Linux Out-Of-Memory killer adjustments have to
 	 * be made. The oom_adj or oom_score_adj is inherited by child
@@ -1241,6 +1243,13 @@ int main(int argc, char **argv)
 			}
 		}
 		verbose("pipes closed in child");
+
+		if ( outputmeta ) {
+			if ( fclose(metafile)!=0 ) {
+				error(errno,"closing file `%s'",metafilename);
+			}
+			verbose("metafile closed in child");
+		}
 
 		/* And execute child command. */
 		execvp(cmdname,cmdargs);

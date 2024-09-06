@@ -7,7 +7,7 @@ DOMjudge can optionally present country flags, affiliation logos,
 team pictures and a page-wide banner on the public interface.
 
 You can place the images under the path `public/images/` (see
-the Config checker in the admin interfae for the full filesystem
+the Config checker in the admin interface for the full filesystem
 path of your installation) as follows:
 
 - *Country flags* are shown when the ``show_flags`` configuration option
@@ -405,7 +405,7 @@ Clearing the PHP/Symfony cache
 ------------------------------
 
 Some operations require you to clear the PHP/Symfony cache. To do this, execute
-the `webapp/bin/console` (see the Config checker in the admin interfae for the
+the `webapp/bin/console` (see the Config checker in the admin interface for the
 full filesystem path of your installation) binary with the `cache:clear` subcommand::
 
   webapp/bin/console cache:clear
