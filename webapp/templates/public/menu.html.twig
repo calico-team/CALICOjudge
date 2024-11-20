@@ -1,6 +1,6 @@
 <nav class="navbar navbar-expand-md navbar-light bg-light fixed-top">
   <div class="container-fluid">
-    <a class="navbar-brand hidden-sm-down" href="{{ path('public_index') }}">DOMjudge</a>
+    <a class="navbar-brand hidden-sm-down" href="{{ path('public_index') }}">CALICOjudge</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menuDefault"
             aria-controls="menuDefault" aria-expanded="false" aria-label="Toggle navigation">
         <span class="navbar-toggler-icon"></span>
@@ -24,7 +24,7 @@
                     <a class="nav-link disabled"><i class="fas fa-book-open"></i> Problemset</a>
                 {% endif %}
             </li>
-
+            <li class="nav-item"><a class="nav-link" href="https://calico.cs.berkeley.edu/bugreport"><i class="fas fa-bug"></i> Bug Report</a></li>
             {% if is_granted('ROLE_TEAM') %}
                 <li class="nav-item">
                     <a class="nav-link" href="{{ path('team_index') }}">

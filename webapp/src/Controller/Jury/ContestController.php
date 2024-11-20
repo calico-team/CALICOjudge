@@ -347,7 +347,7 @@ class ContestController extends BaseController
             ->select('cp', 'p')
             ->andWhere('cp.contest = :contest')
             ->setParameter('contest', $contest)
-            ->orderBy('cp.shortname')
+            ->orderBy('p.probid')
             ->getQuery()
             ->getResult();
 
